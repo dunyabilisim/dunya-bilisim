@@ -16,15 +16,29 @@
     body{background:#060b14;color:#e2e8f0;font-family:"DM Mono","Courier New",monospace;overscroll-behavior:none}
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0a1120}::-webkit-scrollbar-thumb{background:#1e2d4a;border-radius:2px}
     select option{background:#0d1525;color:#e2e8f0}
-    @media(max-width:768px){
-      .sidebar{width:100%!important;height:60px!important;position:fixed!important;bottom:0!important;top:auto!important;flex-direction:row!important;z-index:100;border-right:none!important;border-top:1px solid #1e2d4a!important;overflow:visible!important}
+    @media(max-width:900px){
+      .app{flex-direction:column}
+      .sidebar{width:100%!important;height:64px!important;min-height:64px!important;max-height:64px!important;position:fixed!important;bottom:0!important;top:auto!important;left:0!important;right:0!important;flex-direction:row!important;border-right:none!important;border-top:1px solid #1e2d4a!important;overflow:hidden!important;align-items:stretch!important;padding:0!important;z-index:99}
       .sb-logo{display:none!important}
-      .sb-nav{display:flex!important;flex-direction:row!important;padding:4px 0!important;gap:0!important;flex:1!important;align-items:stretch!important}
-      .sb-btn{flex-direction:column!important;gap:1px!important;padding:4px 2px!important;font-size:9px!important;align-items:center!important;flex:1!important;justify-content:center!important}
-      .sb-ikon{font-size:20px!important;width:auto!important;margin-bottom:1px}
       .sb-footer{display:none!important}
-      .content{padding-bottom:72px!important}
-      .sayfa{padding:14px 12px!important}
+      .sb-nav{flex-direction:row!important;padding:0!important;gap:0!important;flex:1!important;align-items:stretch!important;justify-content:space-around!important;width:100%!important}
+      .sb-btn{flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:2px!important;padding:6px 4px!important;font-size:10px!important;flex:1!important;width:auto!important;border-radius:0!important;margin:0!important;height:100%!important}
+      .sb-ikon{font-size:22px!important;width:auto!important;display:block!important}
+      .content{padding-bottom:72px!important;width:100%!important}
+      .sayfa{padding:14px 12px!important;max-width:100%!important}
+      .stat-row{grid-template-columns:1fr 1fr!important}
+      .para-row{grid-template-columns:1fr!important}
+      .alt-grid{grid-template-columns:1fr!important}
+    }
+    @media(max-width:380px){
+      .sb-btn{font-size:8px!important;padding:4px 2px!important}
+      .sb-ikon{font-size:18px!important}
+    }
+    @supports(padding-bottom:env(safe-area-inset-bottom)){
+      @media(max-width:900px){
+        .sidebar{height:calc(64px + env(safe-area-inset-bottom))!important;max-height:calc(64px + env(safe-area-inset-bottom))!important;padding-bottom:env(safe-area-inset-bottom)!important}
+        .content{padding-bottom:calc(72px + env(safe-area-inset-bottom))!important}
+      }
     }
   </style>
 </head>
@@ -144,6 +158,13 @@ function App() {
   const [pazarlikYukleniyor,setPazarlikYukleniyor] = useState(false);
   const [psw,setPsw] = useState({adim:"giris",sistemAdi:"",sistemSpec:"",alisFiyati:"",envanterSecim:"",parcalar:[],sonuc:null,yukleniyor:false,kayitYukleniyor:false});
   const pswSet = (patch) => setPsw(p=>({...p,...patch}));
+
+  const [mobil,setMobil] = useState(window.innerWidth<=900);
+  useEffect(()=>{
+    const fn=()=>setMobil(window.innerWidth<=900);
+    window.addEventListener("resize",fn);
+    return()=>window.removeEventListener("resize",fn);
+  },[]);
 
   const toast$ = (msg,tip="info") => { setToast({msg,tip}); setTimeout(()=>setToast({msg:"",tip:""}),3500); };
 
@@ -424,45 +445,57 @@ PSİKOLOJİ: [1 cümle analiz]`;
   };
 
   return (
-    <div style={s.app}>
+    <div style={{...s.app,...(mobil?{flexDirection:"column"}:{})}}>
       {/* ── SIDEBAR ── */}
-      <aside style={s.sidebar}>
-        <div style={s.sbLogo}>
+      <aside style={mobil?{
+        width:"100%",height:64,minHeight:64,background:"#0a1120",
+        position:"fixed",bottom:0,left:0,right:0,zIndex:99,
+        display:"flex",flexDirection:"row",alignItems:"stretch",
+        borderTop:"1px solid #1e2d4a",overflow:"hidden",
+      }:s.sidebar}>
+        {!mobil&&<div style={s.sbLogo}>
           <div style={s.sbLogoIcon}>⚡</div>
           <div>
             <div style={s.sbLogoT}>Dünya Bilişim</div>
             <div style={s.sbLogoS}>Yönetim Paneli</div>
           </div>
-        </div>
-        <nav style={s.sbNav}>
+        </div>}
+        <nav style={mobil?{display:"flex",flexDirection:"row",flex:1,alignItems:"stretch"}:s.sbNav}>
           {[
             ["dashboard","📊","Dashboard"],
             ["envanter","📦","Envanter"],
-            ["koc","🧠","Satış Koçu"],
+            ["koc","🧠","Koç"],
             ["ayarlar","⚙️","Ayarlar"],
           ].map(([k,ikon,label])=>(
-            <button key={k} style={{...s.sbBtn,...(aktifSayfa===k?s.sbBtnA:{})}} onClick={()=>setAktifSayfa(k)}>
-              <span style={s.sbIkon}>{ikon}</span>
+            <button key={k} style={mobil?{
+              flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+              gap:2,padding:"4px 2px",border:"none",borderRadius:0,
+              background:aktifSayfa===k?"rgba(99,102,241,.2)":"transparent",
+              color:aktifSayfa===k?"#818cf8":"#6b8aaa",cursor:"pointer",fontSize:10,
+              borderTop:aktifSayfa===k?"2px solid #6366f1":"2px solid transparent",
+              position:"relative",
+            }:{...s.sbBtn,...(aktifSayfa===k?s.sbBtnA:{})}} onClick={()=>setAktifSayfa(k)}>
+              <span style={mobil?{fontSize:22}:s.sbIkon}>{ikon}</span>
               <span>{label}</span>
-              {k==="envanter"&&stats.mevcut>0&&<span style={s.sbBadge}>{stats.mevcut}</span>}
-              {k==="koc"&&kocAlarm>0&&<span style={{...s.sbBadge,background:"#ef4444"}}>{kocAlarm}</span>}
+              {k==="envanter"&&stats.mevcut>0&&<span style={{...s.sbBadge,...(mobil?{position:"absolute",top:6,right:"20%",fontSize:9,padding:"0 4px"}:{})}}>{stats.mevcut}</span>}
+              {k==="koc"&&kocAlarm>0&&<span style={{...s.sbBadge,background:"#ef4444",...(mobil?{position:"absolute",top:6,right:"20%",fontSize:9,padding:"0 4px"}:{})}}>{kocAlarm}</span>}
             </button>
           ))}
         </nav>
-        <div style={s.sbFooter}>
+        {!mobil&&<div style={s.sbFooter}>
           <div style={{...s.dbPill,color:dbDurum==="ok"?"#22c55e":dbDurum==="hata"?"#ef4444":"#f59e0b"}}>
             <span style={{width:6,height:6,borderRadius:"50%",background:"currentColor",display:"inline-block"}}></span>
             {dbDurum==="ok"?"Supabase Bağlı":dbDurum==="hata"?"Bağlantı Hatası":"Bağlanıyor..."}
           </div>
-        </div>
+        </div>}
       </aside>
 
       {/* ── MAIN ── */}
-      <div style={s.content}>
+      <div style={{...s.content,...(mobil?{paddingBottom:72}:{})}}>
 
         {/* ── DASHBOARD ── */}
         {aktifSayfa==="dashboard"&&(
-          <div style={s.sayfa}>
+          <div style={{...s.sayfa,...(mobil?{padding:"14px 12px",maxWidth:"100%"}:{})}}>
             <div style={s.pageHdr}>
               <div>
                 <h1 style={s.pageT}>Dashboard</h1>
@@ -472,7 +505,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
             </div>
 
             {/* Stat kartları */}
-            <div style={s.statRow}>
+            <div style={{...s.statRow,...(mobil?{gridTemplateColumns:"1fr 1fr"}:{})}}>
               {[
                 {label:"Toplam Ürün",     val:stats.toplam, ikon:"📦", color:"#6366f1", bg:"rgba(99,102,241,.1)"},
                 {label:"Satışa Hazır",    val:stats.mevcut, ikon:"✅", color:"#22c55e", bg:"rgba(34,197,94,.1)"},
@@ -488,7 +521,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
             </div>
 
             {/* Para kartları */}
-            <div style={s.paraRow}>
+            <div style={{...s.paraRow,...(mobil?{gridTemplateColumns:"1fr"}:{})}}>
               <div style={{...s.paraKart,borderLeft:"3px solid #6366f1"}}>
                 <div style={s.paraIkon}>📈</div>
                 <div style={s.paraIc}>
@@ -513,7 +546,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
             </div>
 
             {/* Alt grid: kategori dağılımı + son hareketler */}
-            <div style={s.altGrid}>
+            <div style={{...s.altGrid,...(mobil?{gridTemplateColumns:"1fr"}:{})}}>
               {/* Kategori bar chart */}
               <div style={s.panel}>
                 <div style={s.panelHdr}>📊 Kategori Dağılımı</div>
@@ -566,7 +599,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
         {/* ── ENVANTER ── */}
         {aktifSayfa==="envanter"&&(
-          <div style={s.sayfa}>
+          <div style={{...s.sayfa,...(mobil?{padding:"14px 12px",maxWidth:"100%"}:{})}}>
             <div style={s.pageHdr}>
               <div>
                 <h1 style={s.pageT}>Envanter</h1>
@@ -668,7 +701,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
         {/* ── KOÇ & ENVANTER SAĞLIĞI ── */}
         {aktifSayfa==="koc"&&(
-          <div style={s.sayfa}>
+          <div style={{...s.sayfa,...(mobil?{padding:"14px 12px",maxWidth:"100%"}:{})}}>
             <div style={s.pageHdr}>
               <div>
                 <h1 style={s.pageT}>🧠 Satış Koçu & Envanter Sağlığı</h1>
@@ -1097,7 +1130,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
         {/* ── AYARLAR ── */}
         {aktifSayfa==="ayarlar"&&(
-          <div style={s.sayfa}>
+          <div style={{...s.sayfa,...(mobil?{padding:"14px 12px",maxWidth:"100%"}:{})}}>
             <div style={s.pageHdr}>
               <div><h1 style={s.pageT}>Ayarlar</h1><p style={s.pageS}>Sistem yapılandırması</p></div>
             </div>
