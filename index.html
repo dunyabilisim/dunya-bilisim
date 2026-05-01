@@ -283,7 +283,31 @@ aciklama alanına 1 cümlelik kısa piyasa notu yaz (Türkçe).`;
     finally { setUretiliyor(false); }
   },[apiKey]);
 
-  const fotoSec=(e)=>{ const file=e.target.files?.[0]; if(!file) return; const reader=new FileReader(); reader.onload=(ev)=>{ hgSet({foto:ev.target.result.split(",")[1],adim:"foto_onay"}); }; reader.readAsDataURL(file); };
+  const fotoSec=(e)=>{
+    const file=e.target.files?.[0];
+    if(!file) return;
+    // Canvas ile sıkıştır — max 1200px, kalite 0.75 → ~200-400KB
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const MAX=1200;
+      let {width,height}=img;
+      if(width>MAX||height>MAX){
+        if(width>height){height=Math.round(height*MAX/width);width=MAX;}
+        else{width=Math.round(width*MAX/height);height=MAX;}
+      }
+      const canvas=document.createElement("canvas");
+      canvas.width=width; canvas.height=height;
+      canvas.getContext("2d").drawImage(img,0,0,width,height);
+      const base64=canvas.toDataURL("image/jpeg",0.75).split(",")[1];
+      const kb=Math.round(base64.length*0.75/1024);
+      console.log(`Foto sıkıştırıldı: ${width}x${height} → ${kb}KB`);
+      hgSet({foto:base64,adim:"foto_onay"});
+      URL.revokeObjectURL(url);
+    };
+    img.onerror=()=>{ toast$("❌ Görsel okunamadı","err"); URL.revokeObjectURL(url); };
+    img.src=url;
+  };
 
   const filtrelenmis=urunler.filter(u=>{
     if(filtre.durum!=="hepsi"&&u.durum!==filtre.durum) return false;
@@ -1187,8 +1211,14 @@ PSİKOLOJİ: [1 cümle analiz]`;
                   <label style={{...s.gBtn,cursor:"pointer",display:"block",textAlign:"center",userSelect:"none"}}>
                     <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={fotoSec}/>
                     <div style={{fontSize:30,marginBottom:8}}>📷</div>
-                    <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>Fotoğraf</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>AI otomatik tanır</div>
+                    <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>Kamera</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>Direkt çek</div>
+                  </label>
+                  <label style={{...s.gBtn,cursor:"pointer",display:"block",textAlign:"center",userSelect:"none"}}>
+                    <input type="file" accept="image/*" style={{display:"none"}} onChange={fotoSec}/>
+                    <div style={{fontSize:30,marginBottom:8}}>🖼️</div>
+                    <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>Galeri</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>Foto seç</div>
                   </label>
                   {[
                     {k:"speccy",i:"📋",b:"Speccy / Metin",a:"Kopyala yapıştır"},
@@ -1210,12 +1240,15 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
             {hg.adim==="foto_onay"&&(
               <div style={s.mBody}>
-                <div style={{textAlign:"center",marginBottom:16}}>
-                  <img src={`data:image/jpeg;base64,${hg.foto}`} alt="ürün" style={{maxWidth:"100%",maxHeight:180,borderRadius:8,border:"1px solid #1e2d4a"}}/>
+                <div style={{textAlign:"center",marginBottom:12}}>
+                  <img src={`data:image/jpeg;base64,${hg.foto}`} alt="ürün" style={{maxWidth:"100%",maxHeight:200,borderRadius:8,border:"1px solid #1e2d4a"}}/>
+                  <div style={{fontSize:11,color:"#22c55e",marginTop:6}}>
+                    ✅ Sıkıştırıldı — {Math.round(hg.foto.length*0.75/1024)} KB
+                  </div>
                 </div>
                 <div style={s.mBtnlar}>
                   <button style={s.geriBtn} onClick={()=>hgSet({adim:"secim"})}>← Geri</button>
-                  <button style={s.devamBtn} onClick={()=>aiTani("foto",hg.foto)} disabled={hg.yukleniyor}>{hg.yukleniyor?"⏳ Tanınıyor...":"🤖 Tanı"}</button>
+                  <button style={s.devamBtn} onClick={()=>aiTani("foto",hg.foto)} disabled={hg.yukleniyor}>{hg.yukleniyor?"⏳ Tanınıyor...":"🤖 AI ile Tanı"}</button>
                 </div>
               </div>
             )}
