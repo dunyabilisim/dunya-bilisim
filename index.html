@@ -462,6 +462,9 @@ function App() {
     const vcard=`BEGIN:VCARD\nVERSION:3.0\nFN:${iletisim.isim||"Dünya Bilişim"}\nTEL:${iletisim.tel||""}\nURL:https://instagram.com/${(iletisim.ig||"").replace("@","")}\nADR:;;${iletisim.adres||""};;;;\nNOTE:2.El Bilisim Urunleri\nEND:VCARD`;
     return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(vcard)}&color=6366f1&bgcolor=0a1120&format=png`;
   };
+
+  // ── PARÇALAMA ANALİZ ──
+  const parcalamaAnaliz = async() => {
     if(!apiKey){toast$("⚠️ API key gerekli","warn");return;}
     const sistemBilgi = psw.envanterSecim
       ? urunler.find(u=>u.id===psw.envanterSecim)
