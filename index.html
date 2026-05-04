@@ -51,35 +51,24 @@ const {useState,useEffect,useCallback} = React;
 const SB_URL = "https://icwirzzhvbbxrqudgmym.supabase.co";
 const SB_KEY = "sb_publishable_wbwfj5pfuAON0w-7qcDAbw_mIDNaza7";
 const SBH = { "Content-Type":"application/json","apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}` };
+const STORAGE_URL = `${SB_URL}/storage/v1/object`;
+const STORAGE_HDR = {"apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`};
 
 const sb = {
-  async getAll() {
-    const r = await fetch(`${SB_URL}/rest/v1/urunler?order=ekleme_tarihi.desc`, { headers: SBH });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
+  async getAll(){const r=await fetch(`${SB_URL}/rest/v1/urunler?order=ekleme_tarihi.desc`,{headers:SBH});if(!r.ok)throw new Error(await r.text());return r.json();},
+  async upsert(u){const r=await fetch(`${SB_URL}/rest/v1/urunler`,{method:"POST",headers:{...SBH,"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id:u.id,ad:u.ad,kategori:u.kategori,marka:u.marka,model:u.model,spec:u.spec,satis_fiyati:parseFloat(u.satisFiyati)||0,alis_fiyati:parseFloat(u.alisFiyati)||null,alt_limit:parseFloat(u.altLimit)||null,durum:u.durum,notlar:u.notlar,ekleme_tarihi:u.eklemeTarihi||new Date().toISOString(),satildi_tarihi:u.satildiTarihi||null,foto_urls:u.fotoUrls||null})});if(!r.ok)throw new Error(await r.text());},
+  async delete(id){const r=await fetch(`${SB_URL}/rest/v1/urunler?id=eq.${id}`,{method:"DELETE",headers:SBH});if(!r.ok)throw new Error(await r.text());},
+  async patch(id,fields){const r=await fetch(`${SB_URL}/rest/v1/urunler?id=eq.${id}`,{method:"PATCH",headers:SBH,body:JSON.stringify(fields)});if(!r.ok)throw new Error(await r.text());},
+  async fotoYukle(urunId,base64,index){
+    const blob=await(await fetch(`data:image/jpeg;base64,${base64}`)).blob();
+    const path=`${urunId}/${index}_${Date.now()}.jpg`;
+    const r=await fetch(`${STORAGE_URL}/urun-fotograflar/${path}`,{method:"POST",headers:{...STORAGE_HDR,"Content-Type":"image/jpeg","x-upsert":"true"},body:blob});
+    if(!r.ok)throw new Error(await r.text());
+    return `${SB_URL}/storage/v1/object/public/urun-fotograflar/${path}`;
   },
-  async upsert(u) {
-    const r = await fetch(`${SB_URL}/rest/v1/urunler`, {
-      method:"POST",
-      headers:{...SBH,"Prefer":"resolution=merge-duplicates"},
-      body:JSON.stringify({
-        id:u.id, ad:u.ad, kategori:u.kategori, marka:u.marka, model:u.model,
-        spec:u.spec, satis_fiyati:parseFloat(u.satisFiyati)||0,
-        alis_fiyati:parseFloat(u.alisFiyati)||null, alt_limit:parseFloat(u.altLimit)||null,
-        durum:u.durum, notlar:u.notlar,
-        ekleme_tarihi:u.eklemeTarihi||new Date().toISOString(),
-        satildi_tarihi:u.satildiTarihi||null,
-      }),
-    });
-    if (!r.ok) throw new Error(await r.text());
-  },
-  async delete(id) {
-    const r = await fetch(`${SB_URL}/rest/v1/urunler?id=eq.${id}`,{method:"DELETE",headers:SBH});
-    if (!r.ok) throw new Error(await r.text());
-  },
-  async patch(id, fields) {
-    const r = await fetch(`${SB_URL}/rest/v1/urunler?id=eq.${id}`,{method:"PATCH",headers:SBH,body:JSON.stringify(fields)});
-    if (!r.ok) throw new Error(await r.text());
+  async fotoSil(path){
+    const r=await fetch(`${SB_URL}/storage/v1/object/urun-fotograflar/${path}`,{method:"DELETE",headers:STORAGE_HDR});
+    return r.ok;
   },
 };
 
@@ -92,6 +81,7 @@ function rowToUrun(row) {
     altLimit:row.alt_limit?.toString()||"",
     durum:row.durum||"mevcut", notlar:row.notlar||"",
     eklemeTarihi:row.ekleme_tarihi, satildiTarihi:row.satildi_tarihi,
+    fotoUrls: row.foto_urls ? (Array.isArray(row.foto_urls)?row.foto_urls:JSON.parse(row.foto_urls)) : [],
   };
 }
 
@@ -146,18 +136,36 @@ function App() {
   const [ilanMetni,setIlanMetni]     = useState(null);
   const [uretiliyor,setUretiliyor]   = useState(false);
   const [filtre,setFiltre]           = useState({durum:"hepsi",kategori:"hepsi",arama:""});
-  const [apiKey,setApiKey]           = useState(localStorage.getItem("db_api_key")||"");
+  const [apiKey,setApiKey] = useState("");
+  const [apiKeyYuklendi,setApiKeyYuklendi] = useState(false);
+
+  // API key'i Supabase'den çek
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/rest/v1/ayarlar?anahtar=eq.claude_api_key&select=deger`,{headers:SBH});
+        if(r.ok){const d=await r.json();if(d[0]?.deger){setApiKey(d[0].deger);}}
+      }catch(e){console.warn("API key çekilemedi:",e);}
+      finally{setApiKeyYuklendi(true);}
+    })();
+  },[]);
+
+  const apiKeySave = async(key)=>{
+    setApiKey(key);
+    try{await fetch(`${SB_URL}/rest/v1/ayarlar?anahtar=eq.claude_api_key`,{method:"PATCH",headers:SBH,body:JSON.stringify({deger:key})});}
+    catch(e){toast$("❌ Key kaydedilemedi","err");}
+  };
   const [girisModal,setGirisModal]   = useState(false);
   const [editForm,setEditForm]       = useState(null);
   const [toast,setToast]             = useState({msg:"",tip:""});
-  const [hg,setHg]                   = useState({adim:"secim",veri:{},alis:"",durum:"mevcut",notlar:"",fiyatlar:null,secFiyat:null,metin:"",foto:null,yukleniyor:false});
+  const [hg,setHg] = useState({adim:"secim",veri:{},alis:"",satisFiyati:"",durum:"mevcut",notlar:"",metin:"",foto:null,ekstraFotolar:[],yukleniyor:false});
   const [kocAktifTab,setKocAktifTab] = useState("saglik");
-  const [pazarlikUrun,setPazarlikUrun]   = useState(null);
-  const [pazarlikTeklif,setPazarlikTeklif] = useState("");
-  const [pazarlikYanit,setPazarlikYanit]   = useState("");
-  const [pazarlikYukleniyor,setPazarlikYukleniyor] = useState(false);
   const [psw,setPsw] = useState({adim:"giris",sistemAdi:"",sistemSpec:"",alisFiyati:"",envanterSecim:"",parcalar:[],sonuc:null,yukleniyor:false,kayitYukleniyor:false});
   const pswSet = (patch) => setPsw(p=>({...p,...patch}));
+  const [waKarti,setWaKarti] = useState(null); // {urun, yukleniyor}
+  const [iletisim,setIletisim] = useState(()=>JSON.parse(localStorage.getItem("db_iletisim")||'{"isim":"Dünya Bilişim","tel":"","ig":"","adres":""}'));
+  const [galeriUrun,setGaleriUrun] = useState(null); // foto galeri modal
+  const [galeriIndex,setGaleriIndex] = useState(0);
 
   const [mobil,setMobil] = useState(window.innerWidth<=900);
   useEffect(()=>{
@@ -178,76 +186,37 @@ function App() {
   useEffect(()=>{veriYukle();},[veriYukle]);
 
   const hgSet = (patch) => setHg(p=>({...p,...patch}));
-  const hgSifirla = () => { setHg({adim:"secim",veri:{},alis:"",durum:"mevcut",notlar:"",fiyatlar:null,secFiyat:null,metin:"",foto:null,yukleniyor:false}); setGirisModal(false); };
+  const hgSifirla = () => { setHg({adim:"secim",veri:{},alis:"",satisFiyati:"",durum:"mevcut",notlar:"",metin:"",foto:null,ekstraFotolar:[],yukleniyor:false}); setGirisModal(false); };
 
-  const aiTani = async(kaynak,deger) => {
+  const aiTani = async(deger) => {
     hgSet({yukleniyor:true,adim:"tani"});
     try {
-      const sys=`Sen bilişim ürünü uzmanısın. Verilen bilgiden ürün bilgilerini çıkar ve SADECE JSON döndür.
-JSON: {"ad":"","kategori":"GPU|CPU|RAM|Anakart|SSD/HDD|PSU|Kasa|Laptop|Komple Sistem|Aksesuar|Diğer","marka":"","model":"","spec":""}`;
-      let messages;
-      if(kaynak==="foto") messages=[{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:deger}},{type:"text",text:"Bu bilişim ürününün bilgilerini JSON olarak çıkar."}]}];
-      else messages=[{role:"user",content:`Şu bilgiden ürün JSON'ı çıkar:\n${deger}`}];
+      const sys=`Sen bilişim ürünü uzmanısın. Verilen bilgiden ürün bilgilerini çıkar ve SADECE JSON döndür.\nJSON: {"ad":"","kategori":"GPU|CPU|RAM|Anakart|SSD/HDD|PSU|Kasa|Laptop|Komple Sistem|Aksesuar|Diğer","marka":"","model":"","spec":""}`;
+      const messages=[{role:"user",content:`Şu bilgiden ürün JSON'ı çıkar:\n${deger}`}];
       const yanit=await callClaude(messages,apiKey,sys);
       const veri=JSON.parse(yanit.replace(/```json|```/g,"").trim());
       hgSet({veri,adim:"onay",yukleniyor:false});
     } catch(e) { toast$("❌ Tanıma hatası: "+e.message,"err"); hgSet({adim:"secim",yukleniyor:false}); }
   };
 
-  const aiFiyat = async() => {
-    if(!hg.alis){ toast$("⚠️ Alış fiyatı girin","warn"); return; }
-    hgSet({yukleniyor:true,adim:"fiyat"});
-    try {
-      const alis = parseFloat(hg.alis);
-      const sys=`Sen Türkiye sahibinden.com ve letgo 2.el bilişim piyasası uzmanısın.
-Görevin: Gerçekçi Türk Lirası satış fiyatı önermek.
-
-KURALLI:
-- Fiyatlar MUTLAKA Türk Lirası (TL) cinsinden olacak
-- Alış fiyatından YÜKSEK olacak (kâr sağlanacak)
-- Sahibinden.com güncel 2.el piyasasını baz al
-- GPU için tipik kâr marjı %15-40, CPU %10-25, RAM %10-20, Laptop %10-30
-- Hızlı fiyat: alış * 1.10 ile 1.15 arası
-- Normal fiyat: alış * 1.20 ile 1.35 arası  
-- Sabır fiyatı: alış * 1.35 ile 1.50 arası
-- Fiyatlar 50 TL'nin katı olsun (psikolojik fiyatlandırma)
-- SADECE JSON döndür, başka hiçbir şey yazma
-
-JSON formatı: {"hizli":0,"normal":0,"sabir":0,"aciklama":""}`;
-
-      const prompt=`Ürün: ${hg.veri.ad}
-Marka/Model: ${hg.veri.marka} ${hg.veri.model}
-Kategori: ${hg.veri.kategori}
-Spec: ${hg.veri.spec}
-Alış fiyatım: ${alis} TL
-
-Bu ürün için Türkiye sahibinden.com 2.el piyasasında gerçekçi 3 farklı satış fiyatı öner.
-Fiyatlar ${alis} TL'nin üzerinde OLMAK ZORUNDA. Minimum %10 kâr marjı şart.
-aciklama alanına 1 cümlelik kısa piyasa notu yaz (Türkçe).`;
-
-      const yanit=await callClaude([{role:"user",content:prompt}],apiKey,sys);
-      const clean=yanit.replace(/```json|```/g,"").trim();
-      const json=clean.substring(clean.indexOf("{"),clean.lastIndexOf("}")+1);
-      const fiyatlar=JSON.parse(json);
-      
-      // Güvenlik: alıştan düşükse otomatik düzelt
-      const duzelt=(f,min)=>Math.max(f,min);
-      const minH=Math.round(alis*1.10/50)*50;
-      const minN=Math.round(alis*1.20/50)*50;
-      const minS=Math.round(alis*1.35/50)*50;
-      fiyatlar.hizli=duzelt(fiyatlar.hizli,minH);
-      fiyatlar.normal=duzelt(fiyatlar.normal,minN);
-      fiyatlar.sabir=duzelt(fiyatlar.sabir,minS);
-      
-      hgSet({fiyatlar,secFiyat:fiyatlar.normal.toString(),yukleniyor:false});
-    } catch(e) { toast$("❌ Fiyat hatası: "+e.message,"err"); hgSet({adim:"onay",yukleniyor:false}); }
-  };
-
   const hgKaydet = async() => {
-    if(!hg.veri.ad||!hg.secFiyat){ toast$("⚠️ Bilgiler eksik","warn"); return; }
-    const urun={id:Date.now().toString(),ad:hg.veri.ad,kategori:hg.veri.kategori||"Diğer",marka:hg.veri.marka||"",model:hg.veri.model||"",spec:hg.veri.spec||"",satisFiyati:hg.secFiyat,alisFiyati:hg.alis,altLimit:"",durum:hg.durum,notlar:hg.notlar,eklemeTarihi:new Date().toISOString()};
-    try { await sb.upsert(urun); setUrunler(p=>[urun,...p]); hgSifirla(); toast$("✅ Ürün eklendi","ok"); }
-    catch(e) { toast$("❌ "+e.message,"err"); }
+    if(!hg.veri.ad||!hg.satisFiyati){ toast$("⚠️ Ürün adı ve satış fiyatı zorunlu","warn"); return; }
+    hgSet({yukleniyor:true});
+    try {
+      const urunId = Date.now().toString();
+      // Fotoları yükle
+      const fotoUrls = [];
+      const tumFotolar = [hg.foto, ...hg.ekstraFotolar].filter(Boolean);
+      for(let i=0;i<tumFotolar.length;i++){
+        try { const url=await sb.fotoYukle(urunId,tumFotolar[i],i); fotoUrls.push(url); }
+        catch(e){ console.warn("Foto yüklenemedi:",e.message); }
+      }
+      const urun={id:urunId,ad:hg.veri.ad,kategori:hg.veri.kategori||"Diğer",marka:hg.veri.marka||"",model:hg.veri.model||"",spec:hg.veri.spec||"",satisFiyati:hg.satisFiyati,alisFiyati:hg.alis,altLimit:"",durum:hg.durum,notlar:hg.notlar,eklemeTarihi:new Date().toISOString(),fotoUrls};
+      await sb.upsert(urun);
+      setUrunler(p=>[urun,...p]);
+      hgSifirla();
+      toast$(`✅ Ürün eklendi${fotoUrls.length>0?` (${fotoUrls.length} foto)`:""}`,"ok");
+    } catch(e) { toast$("❌ "+e.message,"err"); hgSet({yukleniyor:false}); }
   };
 
   const durumGuncelle = async(id,durum) => {
@@ -283,30 +252,125 @@ aciklama alanına 1 cümlelik kısa piyasa notu yaz (Türkçe).`;
     finally { setUretiliyor(false); }
   },[apiKey]);
 
-  const fotoSec=(e)=>{
-    const file=e.target.files?.[0];
-    if(!file) return;
-    // Canvas ile sıkıştır — max 1200px, kalite 0.75 → ~200-400KB
-    const img=new Image();
-    const url=URL.createObjectURL(file);
+  // Fotoğraf sıkıştır (canvas ile)
+  const gorselSikistir=(file)=>new Promise((res,rej)=>{
+    const img=new Image(); const url=URL.createObjectURL(file);
     img.onload=()=>{
-      const MAX=1200;
-      let {width,height}=img;
-      if(width>MAX||height>MAX){
-        if(width>height){height=Math.round(height*MAX/width);width=MAX;}
-        else{width=Math.round(width*MAX/height);height=MAX;}
-      }
-      const canvas=document.createElement("canvas");
-      canvas.width=width; canvas.height=height;
-      canvas.getContext("2d").drawImage(img,0,0,width,height);
-      const base64=canvas.toDataURL("image/jpeg",0.75).split(",")[1];
-      const kb=Math.round(base64.length*0.75/1024);
-      console.log(`Foto sıkıştırıldı: ${width}x${height} → ${kb}KB`);
-      hgSet({foto:base64,adim:"foto_onay"});
+      const MAX=1200; let {width,height}=img;
+      if(width>MAX||height>MAX){if(width>height){height=Math.round(height*MAX/width);width=MAX;}else{width=Math.round(width*MAX/height);height=MAX;}}
+      const c=document.createElement("canvas"); c.width=width; c.height=height;
+      c.getContext("2d").drawImage(img,0,0,width,height);
+      res(c.toDataURL("image/jpeg",0.75).split(",")[1]);
       URL.revokeObjectURL(url);
     };
-    img.onerror=()=>{ toast$("❌ Görsel okunamadı","err"); URL.revokeObjectURL(url); };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("Görsel okunamadı"));};
     img.src=url;
+  });
+
+  const fotoSec=(e,ekstra=false)=>{
+    const files=Array.from(e.target.files||[]);
+    if(!files.length) return;
+    Promise.all(files.map(gorselSikistir)).then(base64Arr=>{
+      if(ekstra){
+        hgSet({ekstraFotolar:[...hg.ekstraFotolar,...base64Arr].slice(0,4)});
+      } else {
+        hgSet({foto:base64Arr[0],ekstraFotolar:base64Arr.slice(1,4),adim:"foto_onay"});
+      }
+    }).catch(e=>toast$("❌ "+e.message,"err"));
+  };
+
+  // WhatsApp Kartı — Canvas ile görsel üret
+  const waKartOlustur=async(urun)=>{
+    setWaKarti({urun,yukleniyor:true});
+    await new Promise(r=>setTimeout(r,100));
+    try {
+      const W=800,H=520;
+      const c=document.createElement("canvas"); c.width=W; c.height=H;
+      const ctx=c.getContext("2d");
+      // Arka plan
+      ctx.fillStyle="#0a1120"; ctx.fillRect(0,0,W,H);
+      // Sol foto alanı
+      const fotoX=24,fotoY=24,fotoW=280,fotoH=280;
+      ctx.fillStyle="#1e2d4a"; ctx.roundRect(fotoX,fotoY,fotoW,fotoH,12); ctx.fill();
+      // Foto varsa yükle
+      const urls=urun.fotoUrls||[];
+      if(urls[0]){
+        try{
+          const img=await new Promise((res,rej)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>res(i);i.onerror=rej;i.src=urls[0];});
+          // cover fit
+          const ar=img.width/img.height; const fAr=fotoW/fotoH;
+          let sx=0,sy=0,sw=img.width,sh=img.height;
+          if(ar>fAr){sw=img.height*fAr;sx=(img.width-sw)/2;}else{sh=img.width/fAr;sy=(img.height-sh)/2;}
+          ctx.save(); ctx.beginPath(); ctx.roundRect(fotoX,fotoY,fotoW,fotoH,12); ctx.clip();
+          ctx.drawImage(img,sx,sy,sw,sh,fotoX,fotoY,fotoW,fotoH);
+          ctx.restore();
+        }catch(_){}
+      } else {
+        ctx.fillStyle="#4a6180"; ctx.font="48px serif"; ctx.textAlign="center";
+        ctx.fillText(KAT_IKON[urun.kategori]||"📋",fotoX+fotoW/2,fotoY+fotoH/2+18);
+      }
+      // Mini foto grid (sağ altında)
+      if(urls.length>1){
+        const miniSize=62,gap=6,startX=fotoX,startY=fotoY+fotoH+gap;
+        for(let i=1;i<Math.min(urls.length,4);i++){
+          const mx=startX+(i-1)*(miniSize+gap);
+          try{
+            const img=await new Promise((res,rej)=>{const im=new Image();im.crossOrigin="anonymous";im.onload=()=>res(im);im.onerror=rej;im.src=urls[i];});
+            ctx.save(); ctx.beginPath(); ctx.roundRect(mx,startY,miniSize,miniSize,6); ctx.clip();
+            ctx.drawImage(img,mx,startY,miniSize,miniSize); ctx.restore();
+          }catch(_){ctx.fillStyle="#1e2d4a";ctx.beginPath();ctx.roundRect(mx,startY,miniSize,miniSize,6);ctx.fill();}
+        }
+      }
+      // Sağ içerik alanı
+      const tx=332;
+      // Kategori badge
+      ctx.fillStyle="rgba(99,102,241,.25)"; ctx.beginPath(); ctx.roundRect(tx,28,120,26,13); ctx.fill();
+      ctx.fillStyle="#818cf8"; ctx.font="bold 13px monospace"; ctx.textAlign="left";
+      ctx.fillText(`${KAT_IKON[urun.kategori]||""} ${urun.kategori}`,tx+12,46);
+      // Ürün adı
+      ctx.fillStyle="#f0f4f8"; ctx.font="bold 26px monospace";
+      const adWords=urun.ad.split(" ");
+      let satir=""; const satirlar=[];
+      for(const w of adWords){if(ctx.measureText(satir+w).width>420){satirlar.push(satir.trim());satir="";}satir+=w+" ";}
+      satirlar.push(satir.trim());
+      satirlar.slice(0,2).forEach((s,i)=>ctx.fillText(s,tx,82+i*30));
+      // Marka/Model
+      if(urun.marka||urun.model){ctx.fillStyle="#64748b";ctx.font="14px monospace";ctx.fillText(`${urun.marka} ${urun.model}`.trim(),tx,satir.length>0?148:128);}
+      // Spec (max 3 satır)
+      if(urun.spec){
+        ctx.fillStyle="#94a3b8"; ctx.font="13px monospace";
+        const specSatirlar=urun.spec.split(/[,\n]/).map(s=>s.trim()).filter(Boolean).slice(0,4);
+        specSatirlar.forEach((s,i)=>{ctx.fillText(`• ${s}`,tx,178+i*20);});
+      }
+      // Separator
+      ctx.strokeStyle="#1e2d4a"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(tx,290); ctx.lineTo(W-24,290); ctx.stroke();
+      // Fiyat
+      ctx.fillStyle="#22c55e"; ctx.font="bold 32px monospace";
+      ctx.fillText(`${parseFloat(urun.satisFiyati||0).toLocaleString("tr-TR")} ₺`,tx,330);
+      ctx.fillStyle="#4a6180"; ctx.font="12px monospace";
+      ctx.fillText("SATIŞ FİYATI",tx,348);
+      // Durum badge
+      const d=DURUMLAR[urun.durum]||DURUMLAR.mevcut;
+      ctx.fillStyle=d.bg.replace("rgba","rgba").replace(".15)",".4)");
+      ctx.beginPath(); ctx.roundRect(tx,360,120,28,14); ctx.fill();
+      ctx.fillStyle=d.color; ctx.font="bold 13px monospace";
+      ctx.fillText(`● ${d.label}`,tx+12,379);
+      // İletişim bilgileri kutusu
+      ctx.fillStyle="#060b14"; ctx.beginPath(); ctx.roundRect(tx,400,W-tx-24,96,10); ctx.fill();
+      ctx.strokeStyle="#1e2d4a"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.roundRect(tx,400,W-tx-24,96,10); ctx.stroke();
+      ctx.fillStyle="#818cf8"; ctx.font="bold 14px monospace"; ctx.fillText("📞 "+iletisim.isim,tx+14,422);
+      if(iletisim.tel){ctx.fillStyle="#94a3b8";ctx.font="13px monospace";ctx.fillText("📱 "+iletisim.tel,tx+14,442);}
+      if(iletisim.ig){ctx.fillStyle="#94a3b8";ctx.font="13px monospace";ctx.fillText("📸 "+iletisim.ig,tx+14,462);}
+      if(iletisim.adres){ctx.fillStyle="#64748b";ctx.font="12px monospace";ctx.fillText("📍 "+iletisim.adres,tx+14,482);}
+      // Alt şerit
+      ctx.fillStyle="rgba(99,102,241,.12)"; ctx.fillRect(0,H-28,W,28);
+      ctx.fillStyle="#4a6180"; ctx.font="11px monospace"; ctx.textAlign="center";
+      ctx.fillText("Dünya Bilişim — 2. El Bilişim Ürünleri",W/2,H-10);
+      const dataUrl=c.toDataURL("image/png");
+      setWaKarti({urun,yukleniyor:false,dataUrl});
+    } catch(e){ toast$("❌ Kart hatası: "+e.message,"err"); setWaKarti(null); }
   };
 
   const filtrelenmis=urunler.filter(u=>{
@@ -326,7 +390,78 @@ aciklama alanına 1 cümlelik kısa piyasa notu yaz (Türkçe).`;
     kar:urunler.filter(u=>u.durum==="satildi"&&u.alisFiyati).reduce((s,u)=>s+(parseFloat(u.satisFiyati)-parseFloat(u.alisFiyati)),0),
   };
 
-  const parcalamaAnaliz = async() => {
+  // ── PDF STOK LİSTESİ ──
+  const pdfOlustur = (kategoriFiltre="hepsi") => {
+    const liste = urunler.filter(u=>{
+      if(u.durum==="satildi") return false;
+      if(kategoriFiltre!=="hepsi"&&u.kategori!==kategoriFiltre) return false;
+      return true;
+    }).sort((a,b)=>a.kategori.localeCompare(b.kategori));
+    if(!liste.length){toast$("⚠️ Listelenecek ürün yok","warn");return;}
+    const tarih=new Date().toLocaleDateString("tr-TR");
+    const baslik=kategoriFiltre==="hepsi"?"Tüm Aktif Stok":kategoriFiltre+" Stok Listesi";
+    const satirlar=liste.map((u,i)=>`
+      <tr style="background:${i%2===0?"#f8fafc":"#fff"}">
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;font-weight:600;color:#1e293b">${u.ad}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;color:#475569">${u.kategori}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;color:#475569">${u.marka} ${u.model}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;color:#64748b;font-size:11px;max-width:200px">${(u.spec||"").slice(0,80)}${u.spec?.length>80?"...":""}</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;font-weight:700;color:#16a34a;text-align:right">${parseFloat(u.satisFiyati||0).toLocaleString("tr-TR")} ₺</td>
+        <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center">
+          <span style="background:${DURUMLAR[u.durum]?.bg||"#f1f5f9"};color:${DURUMLAR[u.durum]?.color||"#64748b"};padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600">${DURUMLAR[u.durum]?.label||u.durum}</span>
+        </td>
+      </tr>`).join("");
+    const toplamFiyat=liste.reduce((s,u)=>s+(parseFloat(u.satisFiyati)||0),0);
+    const html=`<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"/>
+    <title>${baslik} — ${tarih}</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#1e293b}
+      .header{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:20px 24px;border-radius:10px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+      .header h1{margin:0;font-size:20px}
+      .header p{margin:4px 0 0;opacity:.8;font-size:13px}
+      .meta{display:flex;gap:16px;margin-bottom:16px;font-size:13px;color:#64748b}
+      .meta span{background:#f1f5f9;padding:4px 12px;border-radius:6px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th{background:#4f46e5;color:white;padding:10px;text-align:left;font-size:12px;letter-spacing:.5px}
+      .footer{margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px;display:flex;justify-content:space-between;font-size:13px;color:#475569}
+      .footer strong{color:#16a34a;font-size:16px}
+      @media print{body{padding:10px}.header{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body>
+    <div class="header">
+      <div><h1>⚡ ${iletisim.isim||"Dünya Bilişim"}</h1><p>${baslik} — ${tarih}</p></div>
+      <div style="text-align:right;font-size:13px">
+        ${iletisim.tel?`📱 ${iletisim.tel}<br/>`:""}
+        ${iletisim.ig?`📸 ${iletisim.ig}`:""}
+      </div>
+    </div>
+    <div class="meta">
+      <span>📦 ${liste.length} ürün</span>
+      <span>💰 Toplam: ${toplamFiyat.toLocaleString("tr-TR")} ₺</span>
+      ${kategoriFiltre!=="hepsi"?`<span>🏷️ ${kategoriFiltre}</span>`:""}
+    </div>
+    <table>
+      <thead><tr>
+        <th>ÜRÜN ADI</th><th>KATEGORİ</th><th>MARKA/MODEL</th><th>ÖZELLİKLER</th><th style="text-align:right">FİYAT</th><th style="text-align:center">DURUM</th>
+      </tr></thead>
+      <tbody>${satirlar}</tbody>
+    </table>
+    <div class="footer">
+      <span>📅 ${tarih} tarihinde oluşturuldu</span>
+      <span>Toplam Stok Değeri: <strong>${toplamFiyat.toLocaleString("tr-TR")} ₺</strong></span>
+    </div>
+    <script>window.onload=()=>window.print();<\/script>
+    </body></html>`;
+    const w=window.open("","_blank");
+    if(w){w.document.write(html);w.document.close();}
+    else toast$("⚠️ Popup engelleyiciyi kapat","warn");
+  };
+
+  // ── QR KOD (vCard) ──
+  const [qrModal,setQrModal] = useState(false);
+  const qrVcard=()=>{
+    const vcard=`BEGIN:VCARD\nVERSION:3.0\nFN:${iletisim.isim||"Dünya Bilişim"}\nTEL:${iletisim.tel||""}\nURL:https://instagram.com/${(iletisim.ig||"").replace("@","")}\nADR:;;${iletisim.adres||""};;;;\nNOTE:2.El Bilisim Urunleri\nEND:VCARD`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(vcard)}&color=6366f1&bgcolor=0a1120&format=png`;
+  };
     if(!apiKey){toast$("⚠️ API key gerekli","warn");return;}
     const sistemBilgi = psw.envanterSecim
       ? urunler.find(u=>u.id===psw.envanterSecim)
@@ -627,10 +762,13 @@ PSİKOLOJİ: [1 cümle analiz]`;
             <div style={s.pageHdr}>
               <div>
                 <h1 style={s.pageT}>Envanter</h1>
-                <p style={s.pageS}>{urunler.length} ürün kayıtlı</p>
+                <p style={s.pageS}>{urunler.length} ürün · {urunler.filter(u=>u.durum==="mevcut").length} satışta</p>
               </div>
-              <div style={{display:"flex",gap:8}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <button style={s.refreshBtn} onClick={veriYukle}>{yukleniyor?"⏳":"🔄"}</button>
+                <button style={{...s.refreshBtn,color:"#a78bfa",borderColor:"#7c3aed44"}} onClick={()=>pdfOlustur(filtre.kategori)}>
+                  📄 PDF {filtre.kategori!=="hepsi"?`(${filtre.kategori})`:"Tümü"}
+                </button>
                 <button style={s.ekleBtn} onClick={()=>{hgSet({adim:"secim"});setGirisModal(true);}}>+ Ürün Ekle</button>
               </div>
             </div>
@@ -691,6 +829,35 @@ PSİKOLOJİ: [1 cümle analiz]`;
                     </div>
                     {acik&&(
                       <div style={s.detayPanel}>
+                        {/* Foto Galerisi */}
+                        <div style={s.detayBolum}>
+                          <div style={s.detayBaslik}>📸 Fotoğraflar {u.fotoUrls?.length>0?`(${u.fotoUrls.length})`:""}</div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                            {(u.fotoUrls||[]).map((url,i)=>(
+                              <div key={i} style={{width:68,height:68,borderRadius:8,overflow:"hidden",cursor:"pointer",border:"2px solid #1e2d4a",flexShrink:0}}
+                                onClick={()=>{setGaleriUrun(u);setGaleriIndex(i);}}>
+                                <img src={url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                              </div>
+                            ))}
+                            <label style={{width:68,height:68,borderRadius:8,border:"2px dashed #2d3d5a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#4a6180",fontSize:10,gap:2,flexShrink:0,background:"#0a1120"}}>
+                              <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={async(e)=>{
+                                const files=Array.from(e.target.files||[]).slice(0,5);
+                                if(!files.length)return;
+                                toast$("⏳ Yükleniyor...","info");
+                                try{
+                                  const yeni=await Promise.all(files.map(gorselSikistir));
+                                  const urls=[...(u.fotoUrls||[])];
+                                  for(let i=0;i<yeni.length;i++){const url=await sb.fotoYukle(u.id,yeni[i],urls.length+i);urls.push(url);}
+                                  await sb.patch(u.id,{foto_urls:urls});
+                                  setUrunler(p=>p.map(x=>x.id===u.id?{...x,fotoUrls:urls}:x));
+                                  toast$(`✅ ${yeni.length} foto eklendi`,"ok");
+                                }catch(err){toast$("❌ "+err.message,"err");}
+                              }}/>
+                              <span style={{fontSize:22,lineHeight:1}}>+</span>
+                              <span>Ekle</span>
+                            </label>
+                          </div>
+                        </div>
                         <div style={s.detayBolum}>
                           <div style={s.detayBaslik}>Durum Değiştir</div>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -702,15 +869,12 @@ PSİKOLOJİ: [1 cümle analiz]`;
                           </div>
                         </div>
                         <div style={s.detayBolum}>
-                          <div style={s.detayBaslik}>AI İlan Üretici</div>
-                          <button style={s.ilanBtn} onClick={()=>ilanUret(u)} disabled={uretiliyor}>
-                            {uretiliyor?"⏳ Üretiliyor...":"📝 4 Platform için İlan Metni Üret"}
-                          </button>
-                          {ilanMetni&&(
-                            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
-                              {Object.entries(ilanMetni).map(([p,m])=><IlanBlok key={p} platform={p} metin={m}/>)}
-                            </div>
-                          )}
+                          <div style={s.detayBaslik}>Paylaş & İlan</div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                            <button style={{...s.ilanBtn,background:"#16a34a"}} onClick={()=>waKartOlustur(u)}>📲 WhatsApp Kartı</button>
+                            <button style={s.ilanBtn} onClick={()=>ilanUret(u)} disabled={uretiliyor}>{uretiliyor?"⏳ Üretiliyor...":"📝 İlan Metni"}</button>
+                          </div>
+                          {ilanMetni&&<div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>{Object.entries(ilanMetni).map(([p,m])=><IlanBlok key={p} platform={p} metin={m}/>)}</div>}
                         </div>
                         {u.notlar&&<div style={s.detayBolum}><div style={s.detayBaslik}>Notlar</div><div style={{fontSize:12,color:"#94a3b8"}}>{u.notlar}</div></div>}
                       </div>
@@ -735,7 +899,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
             {/* Sekme barı */}
             <div style={s.tabBar}>
-              {[["saglik","🩺 Stok Sağlığı"],["pazarlik","🤝 Pazarlık Asistanı"],["kar","💹 Kâr Analizi"],["simulasyon","🎯 Senaryo Sim."],["parcala","🔧 Parçalama Sihirbazı"]].map(([k,l])=>(
+              {[["saglik","🩺 Stok Sağlığı"],["kar","💹 Kâr Analizi"],["simulasyon","🎯 Simülasyon"],["parcala","🔧 Parçalama"]].map(([k,l])=>(
                 <button key={k} style={{...s.tab,...(kocAktifTab===k?s.tabA:{})}} onClick={()=>setKocAktifTab(k)}>{l}</button>
               ))}
             </div>
@@ -796,92 +960,6 @@ PSİKOLOJİ: [1 cümle analiz]`;
                         </div>
                       );
                     })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── PAZARLIK ASİSTANI ── */}
-            {kocAktifTab==="pazarlik"&&(
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-                <div style={s.panel}>
-                  <div style={s.panelHdr}>🤝 Müşteri Teklifi Analizi</div>
-                  <div style={{padding:18,display:"flex",flexDirection:"column",gap:12}}>
-                    <div style={s.fGrup}>
-                      <label style={s.fLbl}>Ürün Seç</label>
-                      <select style={s.fInput} value={pazarlikUrun||""} onChange={e=>setPazarlikUrun(e.target.value)}>
-                        <option value="">— Ürün seçin —</option>
-                        {urunler.filter(u=>u.durum!=="satildi").map(u=>(
-                          <option key={u.id} value={u.id}>{u.ad} — {parseFloat(u.satisFiyati||0).toLocaleString("tr-TR")} ₺</option>
-                        ))}
-                      </select>
-                    </div>
-                    {pazarlikUrun&&(()=>{
-                      const u=urunler.find(x=>x.id===pazarlikUrun);
-                      return u?(
-                        <div style={{background:"#0a1120",border:"1px solid #1e2d4a",borderRadius:8,padding:"10px 14px",fontSize:12}}>
-                          <div style={{color:"#94a3b8",marginBottom:4}}>Seçili ürün bilgileri:</div>
-                          <div style={{color:"#60a5fa"}}>Satış: <strong>{parseFloat(u.satisFiyati||0).toLocaleString("tr-TR")} ₺</strong></div>
-                          {u.alisFiyati&&<div style={{color:"#f59e0b"}}>Alış (gizli): <strong>{parseFloat(u.alisFiyati).toLocaleString("tr-TR")} ₺</strong></div>}
-                          {u.altLimit&&<div style={{color:"#22c55e"}}>Alt limit: <strong>{parseFloat(u.altLimit).toLocaleString("tr-TR")} ₺</strong></div>}
-                        </div>
-                      ):null;
-                    })()}
-                    <div style={s.fGrup}>
-                      <label style={s.fLbl}>Müşterinin Teklif Ettiği Fiyat (₺)</label>
-                      <input style={s.fInput} type="number" placeholder="örn: 38000" value={pazarlikTeklif} onChange={e=>setPazarlikTeklif(e.target.value)}/>
-                    </div>
-                    <button style={{...s.devamBtn,width:"100%",padding:"10px"}} onClick={pazarlikAnaliz} disabled={pazarlikYukleniyor||!apiKey}>
-                      {pazarlikYukleniyor?"⏳ Analiz ediliyor...":!apiKey?"⚠️ API key gerekli":"🤖 Strateji Üret"}
-                    </button>
-                  </div>
-                </div>
-
-                <div style={s.panel}>
-                  <div style={s.panelHdr}>💬 AI Yanıtı & Strateji</div>
-                  <div style={{padding:18}}>
-                    {!pazarlikYanit&&!pazarlikYukleniyor&&(
-                      <div style={{...s.bos,padding:"40px 0"}}>
-                        <div style={{fontSize:36,marginBottom:8}}>🤝</div>
-                        <div>Ürün seç, müşteri teklifini gir ve AI'dan strateji al</div>
-                      </div>
-                    )}
-                    {pazarlikYukleniyor&&(
-                      <div style={{...s.bos,padding:"40px 0"}}>
-                        <div style={{fontSize:36,marginBottom:8}}>🤖</div>
-                        <div style={{color:"#818cf8"}}>Pazarlık stratejisi hesaplanıyor...</div>
-                      </div>
-                    )}
-                    {pazarlikYanit&&(()=>{
-                      const karar=pazarlikYanit.match(/KARAR:\s*(.+)/)?.[1]?.trim();
-                      const karsiFiyat=pazarlikYanit.match(/KARŞI_FİYAT:\s*(.+)/)?.[1]?.trim();
-                      const wpMetin=pazarlikYanit.match(/WHATSAPP_METIN:\s*([\s\S]+?)(?=PSİKOLOJİ:|$)/)?.[1]?.trim();
-                      const psikoloji=pazarlikYanit.match(/PSİKOLOJİ:\s*(.+)/)?.[1]?.trim();
-                      const kararRenk=karar==="KABUL"?"#22c55e":karar==="RET"?"#ef4444":"#f59e0b";
-                      return (
-                        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                          <div style={{background:`${kararRenk}15`,border:`1px solid ${kararRenk}44`,borderRadius:8,padding:"12px 16px",textAlign:"center"}}>
-                            <div style={{fontSize:22,fontWeight:700,color:kararRenk}}>{karar==="KABUL"?"✅ KABUL ET":karar==="RET"?"❌ REDDET":"🔄 KARŞI TEKLİF"}</div>
-                            {karsiFiyat&&karsiFiyat!=="-"&&<div style={{fontSize:16,color:"#f0f4f8",marginTop:4,fontWeight:600}}>{karsiFiyat}</div>}
-                          </div>
-                          {wpMetin&&(
-                            <div style={{background:"#0a1120",border:"1px solid #22c55e33",borderRadius:8,overflow:"hidden"}}>
-                              <div style={{padding:"6px 12px",background:"rgba(34,197,94,.08)",fontSize:11,fontWeight:600,color:"#22c55e"}}>💬 WhatsApp Mesajı</div>
-                              <div style={{padding:"10px 12px",fontSize:12,color:"#94a3b8",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{wpMetin}</div>
-                              <div style={{padding:"6px 12px",borderTop:"1px solid #1e2d4a"}}>
-                                <button style={{background:"rgba(34,197,94,.15)",border:"none",color:"#22c55e",padding:"4px 12px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600}}
-                                  onClick={()=>navigator.clipboard.writeText(wpMetin)}>📋 Kopyala</button>
-                              </div>
-                            </div>
-                          )}
-                          {psikoloji&&(
-                            <div style={{background:"rgba(129,140,248,.08)",border:"1px solid #818cf833",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#a5b4fc"}}>
-                              🧠 <em>{psikoloji}</em>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
                   </div>
                 </div>
               </div>
@@ -1169,12 +1247,34 @@ PSİKOLOJİ: [1 cümle analiz]`;
               </div>
               <div style={s.ayarKart}>
                 <div style={s.ayarKartHdr}><span>🔑</span><span>Claude API Key</span></div>
-                <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>platform.anthropic.com → API Keys → Create Key. Ücretsiz $5 krediyle başla.</p>
+                <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>Supabase'de güvenli saklanır. Tüm cihazlarda geçerlidir.</p>
                 <input style={{...s.fInput,letterSpacing:apiKey?2:0}} type="password" placeholder="sk-ant-api03-..." value={apiKey}
-                  onChange={e=>{setApiKey(e.target.value);localStorage.setItem("db_api_key",e.target.value);}} />
+                  onChange={e=>apiKeySave(e.target.value)}/>
                 <div style={{fontSize:11,marginTop:6,color:apiKey?"#22c55e":"#ef4444"}}>
-                  {apiKey?"✅ Aktif — AI özellikleri çalışıyor":"❌ Girilmedi — AI özellikleri pasif"}
+                  {!apiKeyYuklendi?"⏳ Yükleniyor...":apiKey?"✅ Aktif — Supabase'de kayıtlı":"❌ Girilmedi — AI özellikleri pasif"}
                 </div>
+                <div style={{fontSize:11,color:"#4a6180",marginTop:4}}>platform.anthropic.com → API Keys → Create Key</div>
+              </div>
+              <div style={s.ayarKart}>
+                <div style={s.ayarKartHdr}><span>📲</span><span>WhatsApp Kartı — İletişim Bilgileri</span></div>
+                <p style={{fontSize:12,color:"#64748b",margin:"0 0 12px"}}>Bu bilgiler WhatsApp paylaşım kartlarında görünür.</p>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {[["İşletme / İsim","isim","Dünya Bilişim","text"],["Telefon","tel","05xx xxx xx xx","tel"],["Instagram","ig","@dunyabilisim","text"],["Adres / Konum","adres","İstanbul, Bağcılar","text"]].map(([lbl,key,ph,type])=>(
+                    <div key={key} style={s.fGrup}>
+                      <label style={s.fLbl}>{lbl}</label>
+                      <input style={s.fInput} type={type} placeholder={ph} value={iletisim[key]||""}
+                        onChange={e=>{const yeni={...iletisim,[key]:e.target.value};setIletisim(yeni);localStorage.setItem("db_iletisim",JSON.stringify(yeni));}}/>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:11,color:"#22c55e",marginTop:8}}>✅ Otomatik kaydediliyor</div>
+              </div>
+              <div style={s.ayarKart}>
+                <div style={s.ayarKartHdr}><span>📱</span><span>Firma QR Kodu</span></div>
+                <p style={{fontSize:12,color:"#64748b",margin:"0 0 12px"}}>İletişim bilgilerini QR koda dönüştür — müşteri okutunca rehbere ekler.</p>
+                <button style={{...s.expBtn,background:"rgba(99,102,241,.15)",borderColor:"#6366f144",color:"#818cf8"}} onClick={()=>setQrModal(true)}>
+                  🔲 QR Kodu Göster & İndir
+                </button>
               </div>
               <div style={s.ayarKart}>
                 <div style={s.ayarKartHdr}><span>📤</span><span>Veri Export</span></div>
@@ -1195,31 +1295,16 @@ PSİKOLOJİ: [1 cümle analiz]`;
             <div style={s.modalHdr}>
               <span style={s.modalT}>
                 {hg.adim==="secim"&&"Ürün Ekle"}
-                {hg.adim==="foto_onay"&&"📷 Fotoğraf Yüklendi"}
                 {(hg.adim==="speccy"||hg.adim==="serbest")&&"✏️ Bilgi Gir"}
                 {hg.adim==="tani"&&"🤖 AI Tanıyor..."}
                 {hg.adim==="onay"&&"Bilgileri Kontrol Et"}
-                {hg.adim==="fiyat"&&"💰 Fiyat Seç"}
               </span>
               <button style={s.xBtn} onClick={hgSifirla}>✕</button>
             </div>
 
             {hg.adim==="secim"&&(
               <div style={s.mBody}>
-                <div style={s.gGrid}>
-                  {/* Fotoğraf butonu — label sarmalı (mobil uyumlu) */}
-                  <label style={{...s.gBtn,cursor:"pointer",display:"block",textAlign:"center",userSelect:"none"}}>
-                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={fotoSec}/>
-                    <div style={{fontSize:30,marginBottom:8}}>📷</div>
-                    <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>Kamera</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>Direkt çek</div>
-                  </label>
-                  <label style={{...s.gBtn,cursor:"pointer",display:"block",textAlign:"center",userSelect:"none"}}>
-                    <input type="file" accept="image/*" style={{display:"none"}} onChange={fotoSec}/>
-                    <div style={{fontSize:30,marginBottom:8}}>🖼️</div>
-                    <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>Galeri</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>Foto seç</div>
-                  </label>
+                <div style={{...s.gGrid,gridTemplateColumns:"1fr 1fr 1fr"}}>
                   {[
                     {k:"speccy",i:"📋",b:"Speccy / Metin",a:"Kopyala yapıştır"},
                     {k:"serbest",i:"✏️",b:"Kısa Yaz",a:"'rtx 3090 msi 24gb'"},
@@ -1238,21 +1323,6 @@ PSİKOLOJİ: [1 cümle analiz]`;
               </div>
             )}
 
-            {hg.adim==="foto_onay"&&(
-              <div style={s.mBody}>
-                <div style={{textAlign:"center",marginBottom:12}}>
-                  <img src={`data:image/jpeg;base64,${hg.foto}`} alt="ürün" style={{maxWidth:"100%",maxHeight:200,borderRadius:8,border:"1px solid #1e2d4a"}}/>
-                  <div style={{fontSize:11,color:"#22c55e",marginTop:6}}>
-                    ✅ Sıkıştırıldı — {Math.round(hg.foto.length*0.75/1024)} KB
-                  </div>
-                </div>
-                <div style={s.mBtnlar}>
-                  <button style={s.geriBtn} onClick={()=>hgSet({adim:"secim"})}>← Geri</button>
-                  <button style={s.devamBtn} onClick={()=>aiTani("foto",hg.foto)} disabled={hg.yukleniyor}>{hg.yukleniyor?"⏳ Tanınıyor...":"🤖 AI ile Tanı"}</button>
-                </div>
-              </div>
-            )}
-
             {(hg.adim==="speccy"||hg.adim==="serbest")&&(
               <div style={s.mBody}>
                 <p style={{fontSize:12,color:"#64748b",marginBottom:10}}>{hg.adim==="speccy"?"Speccy, CPU-Z veya herhangi bir metin yapıştır:":"Kısaca yaz, AI tamamlar:"}</p>
@@ -1261,7 +1331,7 @@ PSİKOLOJİ: [1 cümle analiz]`;
                   value={hg.metin} onChange={e=>hgSet({metin:e.target.value})}/>
                 <div style={s.mBtnlar}>
                   <button style={s.geriBtn} onClick={()=>hgSet({adim:"secim"})}>← Geri</button>
-                  <button style={s.devamBtn} onClick={()=>aiTani("metin",hg.metin)} disabled={!hg.metin||hg.yukleniyor}>{hg.yukleniyor?"⏳ Tanınıyor...":"🤖 AI ile Tamamla"}</button>
+                  <button style={s.devamBtn} onClick={()=>aiTani(hg.metin)} disabled={!hg.metin||hg.yukleniyor}>{hg.yukleniyor?"⏳ Tanınıyor...":"🤖 AI ile Tamamla"}</button>
                 </div>
               </div>
             )}
@@ -1276,9 +1346,9 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
             {hg.adim==="onay"&&(
               <div style={s.mBody}>
-                <p style={{fontSize:12,color:"#64748b",marginBottom:12}}>AI'nın bulduğu bilgileri kontrol et:</p>
+                <p style={{fontSize:12,color:"#64748b",marginBottom:12}}>Bilgileri kontrol et ve fiyatı gir:</p>
                 <div style={s.fGrid}>
-                  <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Ürün Adı</label><input style={s.fInput} value={hg.veri.ad||""} onChange={e=>hgSet({veri:{...hg.veri,ad:e.target.value}})}/></div>
+                  <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Ürün Adı *</label><input style={s.fInput} value={hg.veri.ad||""} onChange={e=>hgSet({veri:{...hg.veri,ad:e.target.value}})}/></div>
                   <div style={s.fGrup}><label style={s.fLbl}>Marka</label><input style={s.fInput} value={hg.veri.marka||""} onChange={e=>hgSet({veri:{...hg.veri,marka:e.target.value}})}/></div>
                   <div style={s.fGrup}><label style={s.fLbl}>Model</label><input style={s.fInput} value={hg.veri.model||""} onChange={e=>hgSet({veri:{...hg.veri,model:e.target.value}})}/></div>
                   <div style={s.fGrup}><label style={s.fLbl}>Kategori</label>
@@ -1291,70 +1361,154 @@ PSİKOLOJİ: [1 cümle analiz]`;
                       {Object.entries(DURUMLAR).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                     </select>
                   </div>
-                  <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Spec</label><textarea style={{...s.fInput,height:56,resize:"vertical"}} value={hg.veri.spec||""} onChange={e=>hgSet({veri:{...hg.veri,spec:e.target.value}})}/></div>
-                  <div style={{gridColumn:"1/-1",...s.fGrup}}>
-                    <label style={{...s.fLbl,color:"#f59e0b"}}>💰 Alış Fiyatı (₺) — Gizli</label>
-                    <input style={{...s.fInput,borderColor:"#f59e0b55"}} type="number" placeholder="0" value={hg.alis} onChange={e=>hgSet({alis:e.target.value})}/>
-                  </div>
-                  <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Notlar</label><input style={s.fInput} placeholder="Kutusuz, çizik..." value={hg.notlar} onChange={e=>hgSet({notlar:e.target.value})}/></div>
-                </div>
-                <div style={s.mBtnlar}>
-                  <button style={s.geriBtn} onClick={()=>hgSet({adim:"secim"})}>← Geri</button>
-                  <button style={s.devamBtn} onClick={aiFiyat} disabled={hg.yukleniyor}>{hg.yukleniyor?"⏳ Hesaplanıyor...":"Fiyat Al →"}</button>
-                </div>
-              </div>
-            )}
+                  <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Spec / Özellikler</label><textarea style={{...s.fInput,height:52,resize:"vertical"}} value={hg.veri.spec||""} onChange={e=>hgSet({veri:{...hg.veri,spec:e.target.value}})}/></div>
 
-            {hg.adim==="fiyat"&&(
-              <div style={s.mBody}>
-                {!hg.fiyatlar&&<div style={{textAlign:"center",padding:"32px 0",color:"#818cf8"}}>💰 Piyasa analizi yapılıyor...</div>}
-                {hg.fiyatlar&&(<>
-                  {hg.fiyatlar.aciklama&&<div style={s.piyasaNot}>💡 {hg.fiyatlar.aciklama}</div>}
-                  <div style={s.fiyatGrid}>
-                    {[
-                      {k:"hizli",i:"🔴",l:"Hızlı Sat",a:"Düşük kâr, çabuk çıkar",v:hg.fiyatlar.hizli},
-                      {k:"normal",i:"🟡",l:"Dengeli",a:"Makul kâr, 1-2 hafta",v:hg.fiyatlar.normal},
-                      {k:"sabir",i:"🟢",l:"Sabırlı",a:"Yüksek kâr, doğru alıcı",v:hg.fiyatlar.sabir},
-                    ].map(f=>{
-                      const kar=hg.alis?f.v-parseFloat(hg.alis):null;
-                      const sec=hg.secFiyat===f.v.toString();
-                      return (
-                        <button key={f.k} style={{...s.fiyatBtn,...(sec?s.fiyatBtnSec:{})}} onClick={()=>hgSet({secFiyat:f.v.toString()})}>
-                          <div style={{fontSize:24,marginBottom:6}}>{f.i}</div>
-                          <div style={{fontWeight:700,fontSize:18,color:"#f0f4f8"}}>{f.v.toLocaleString("tr-TR")} ₺</div>
-                          <div style={{fontWeight:600,fontSize:12,color:"#94a3b8",marginTop:3}}>{f.l}</div>
-                          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{f.a}</div>
-                          {kar!==null&&<div style={{fontSize:12,color:kar>=0?"#22c55e":"#ef4444",marginTop:6,fontWeight:600}}>
-                            {kar>=0?"+":""}{kar.toLocaleString("tr-TR")} ₺ kâr
-                          </div>}
-                        </button>
-                      );
-                    })}
+                  {/* Fiyatlar yan yana */}
+                  <div style={s.fGrup}>
+                    <label style={{...s.fLbl,color:"#22c55e"}}>💵 Satış Fiyatı (₺) *</label>
+                    <input style={{...s.fInput,borderColor:"#22c55e55",fontWeight:700,fontSize:15}} type="number" placeholder="örn: 45000" value={hg.satisFiyati||""} onChange={e=>hgSet({satisFiyati:e.target.value})}/>
                   </div>
                   <div style={s.fGrup}>
-                    <label style={{...s.fLbl,color:"#f59e0b"}}>✏️ Kendi fiyatını gir (₺) — istersen AI önerilerini geç</label>
-                    <input style={{...s.fInput,borderColor:"#f59e0b55",fontSize:15,fontWeight:600}}
-                      type="number"
-                      placeholder="örn: 45000"
-                      value={hg.secFiyat||""}
-                      onChange={e=>hgSet({secFiyat:e.target.value})}/>
-                    {hg.secFiyat&&parseFloat(hg.secFiyat)>0&&hg.alis&&(
-                      <div style={{fontSize:11,marginTop:4,color:parseFloat(hg.secFiyat)>=parseFloat(hg.alis)*1.05?"#22c55e":"#ef4444"}}>
-                        {parseFloat(hg.secFiyat)>=parseFloat(hg.alis)*1.05
-                          ? `✅ Kâr: +${(parseFloat(hg.secFiyat)-parseFloat(hg.alis)).toLocaleString("tr-TR")} ₺ (%${Math.round((parseFloat(hg.secFiyat)/parseFloat(hg.alis)-1)*100)})`
-                          : `⚠️ Alış fiyatının altında veya çok yakın`}
+                    <label style={{...s.fLbl,color:"#f59e0b"}}>🔒 Alış Fiyatı (₺) — Gizli</label>
+                    <input style={{...s.fInput,borderColor:"#f59e0b55"}} type="number" placeholder="örn: 38000" value={hg.alis||""} onChange={e=>hgSet({alis:e.target.value})}/>
+                    {hg.satisFiyati&&hg.alis&&parseFloat(hg.satisFiyati)>0&&parseFloat(hg.alis)>0&&(
+                      <div style={{fontSize:11,marginTop:3,color:parseFloat(hg.satisFiyati)>=parseFloat(hg.alis)*1.05?"#22c55e":"#ef4444"}}>
+                        {parseFloat(hg.satisFiyati)>=parseFloat(hg.alis)*1.05
+                          ?`✅ Kâr: +${(parseFloat(hg.satisFiyati)-parseFloat(hg.alis)).toLocaleString("tr-TR")} ₺ (%${Math.round((parseFloat(hg.satisFiyati)/parseFloat(hg.alis)-1)*100)})`
+                          :"⚠️ Alış fiyatının altında!"}
                       </div>
                     )}
                   </div>
-                  <div style={s.mBtnlar}>
-                    <button style={s.geriBtn} onClick={()=>hgSet({adim:"onay"})}>← Geri</button>
-                    <button style={s.kaydetBtn} onClick={hgKaydet} disabled={!hg.secFiyat}>
-                      💾 Kaydet {hg.secFiyat?`(${parseFloat(hg.secFiyat).toLocaleString("tr-TR")} ₺)`:""}
-                    </button>
+
+                  <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Notlar</label><input style={s.fInput} placeholder="Kutusuz, çizik, garantili..." value={hg.notlar||""} onChange={e=>hgSet({notlar:e.target.value})}/></div>
+
+                  {/* Ekstra fotoğraf ekleme */}
+                  <div style={{gridColumn:"1/-1",...s.fGrup}}>
+                    <label style={s.fLbl}>📸 {hg.foto?"Ana foto + ekstra ekle":"Fotoğraf ekle"}</label>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      {hg.foto&&<div style={{width:56,height:56,borderRadius:6,overflow:"hidden",border:"2px solid #22c55e",flexShrink:0}}><img src={`data:image/jpeg;base64,${hg.foto}`} style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>}
+                      {hg.ekstraFotolar.map((f,i)=>(
+                        <div key={i} style={{width:56,height:56,borderRadius:6,overflow:"hidden",border:"2px solid #1e2d4a",position:"relative",flexShrink:0}}>
+                          <img src={`data:image/jpeg;base64,${f}`} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                          <button onClick={()=>hgSet({ekstraFotolar:hg.ekstraFotolar.filter((_,j)=>j!==i)})}
+                            style={{position:"absolute",top:1,right:1,background:"rgba(0,0,0,.7)",border:"none",color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                        </div>
+                      ))}
+                      {(hg.ekstraFotolar.length<4)&&<label style={{width:56,height:56,borderRadius:6,border:"2px dashed #2d3d5a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#4a6180",fontSize:9,gap:1,background:"#0a1120",flexShrink:0}}>
+                        <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>fotoSec(e,true)}/>
+                        <span style={{fontSize:18,lineHeight:1}}>+</span><span>Foto</span>
+                      </label>}
+                    </div>
+                    <div style={{fontSize:10,color:"#4a6180",marginTop:4}}>Max 5 fotoğraf — Supabase Storage'a yüklenir</div>
                   </div>
-                </>)}
+                </div>
+                <div style={s.mBtnlar}>
+                  <button style={s.geriBtn} onClick={()=>hgSet({adim:"secim"})}>← Geri</button>
+                  <button style={s.kaydetBtn} onClick={hgKaydet} disabled={hg.yukleniyor||!hg.satisFiyati||!hg.veri.ad}>
+                    {hg.yukleniyor?"⏳ Kaydediliyor...":"💾 Kaydet"}
+                  </button>
+                </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── WHATSAPP KARTI MODAL ── */}
+      {waKarti&&(
+        <div style={{...s.overlay,zIndex:300}} onClick={e=>e.target===e.currentTarget&&setWaKarti(null)}>
+          <div style={{...s.modal,maxWidth:600}}>
+            <div style={s.modalHdr}>
+              <span style={s.modalT}>📲 WhatsApp Kartı</span>
+              <button style={s.xBtn} onClick={()=>setWaKarti(null)}>✕</button>
+            </div>
+            <div style={{padding:20}}>
+              {waKarti.yukleniyor&&<div style={{textAlign:"center",padding:"48px 0",color:"#22c55e",fontSize:16}}>⏳ Kart oluşturuluyor...</div>}
+              {waKarti.dataUrl&&(<>
+                <img src={waKarti.dataUrl} alt="WA Kartı" style={{width:"100%",borderRadius:10,border:"1px solid #1e2d4a",marginBottom:16}}/>
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  {/* İndir */}
+                  <a href={waKarti.dataUrl} download={`${waKarti.urun.ad.replace(/\s+/g,"-")}-kart.png`}
+                    style={{...s.kaydetBtn,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6}}>
+                    💾 Görseli İndir
+                  </a>
+                  {/* WhatsApp web link */}
+                  <a href={`https://wa.me/?text=${encodeURIComponent(`*${waKarti.urun.ad}*\n${waKarti.urun.spec||""}\n\n💵 *${parseFloat(waKarti.urun.satisFiyati||0).toLocaleString("tr-TR")} ₺*\n\n📞 ${iletisim.isim}${iletisim.tel?"\n📱 "+iletisim.tel:""}`)}`}
+                    target="_blank" rel="noreferrer"
+                    style={{...s.devamBtn,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6,background:"#16a34a"}}>
+                    💬 WhatsApp'ta Paylaş
+                  </a>
+                </div>
+                <div style={{fontSize:11,color:"#4a6180",marginTop:10}}>
+                  💡 İndir → WhatsApp'ı aç → Fotoğraf olarak gönder. Ya da WhatsApp butonuna bas, metin mesajı gider.
+                </div>
+              </>)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── GALERİ MODAL ── */}
+      {galeriUrun&&(
+        <div style={{...s.overlay,zIndex:250}} onClick={e=>e.target===e.currentTarget&&setGaleriUrun(null)}>
+          <div style={{background:"#0d1525",borderRadius:14,width:"100%",maxWidth:700,overflow:"hidden"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 20px",borderBottom:"1px solid #1e2d4a"}}>
+              <span style={{fontWeight:700,fontSize:14}}>{galeriUrun.ad} — Foto {galeriIndex+1}/{galeriUrun.fotoUrls.length}</span>
+              <button style={s.xBtn} onClick={()=>setGaleriUrun(null)}>✕</button>
+            </div>
+            <div style={{position:"relative",background:"#060b14"}}>
+              <img src={galeriUrun.fotoUrls[galeriIndex]} alt="" style={{width:"100%",maxHeight:"65vh",objectFit:"contain",display:"block"}}/>
+              {galeriUrun.fotoUrls.length>1&&(<>
+                <button onClick={()=>setGaleriIndex(i=>(i-1+galeriUrun.fotoUrls.length)%galeriUrun.fotoUrls.length)}
+                  style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:18}}>‹</button>
+                <button onClick={()=>setGaleriIndex(i=>(i+1)%galeriUrun.fotoUrls.length)}
+                  style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:18}}>›</button>
+              </>)}
+            </div>
+            <div style={{display:"flex",gap:8,padding:12,overflowX:"auto",background:"#0a1120"}}>
+              {galeriUrun.fotoUrls.map((url,i)=>(
+                <div key={i} onClick={()=>setGaleriIndex(i)} style={{width:56,height:56,borderRadius:6,overflow:"hidden",cursor:"pointer",flexShrink:0,border:`2px solid ${i===galeriIndex?"#6366f1":"#1e2d4a"}`}}>
+                  <img src={url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── QR KOD MODAL ── */}
+      {qrModal&&(
+        <div style={{...s.overlay,zIndex:300}} onClick={e=>e.target===e.currentTarget&&setQrModal(false)}>
+          <div style={{...s.modal,maxWidth:420}}>
+            <div style={s.modalHdr}>
+              <span style={s.modalT}>🔲 Firma QR Kodu</span>
+              <button style={s.xBtn} onClick={()=>setQrModal(false)}>✕</button>
+            </div>
+            <div style={{padding:24,textAlign:"center"}}>
+              <div style={{background:"#0a1120",borderRadius:12,padding:20,marginBottom:16,display:"inline-block",border:"1px solid #1e2d4a"}}>
+                <img src={qrVcard()} alt="QR Kod" style={{width:220,height:220,borderRadius:8,display:"block"}}
+                  onError={e=>e.target.style.display="none"}/>
+              </div>
+              <div style={{fontSize:13,color:"#94a3b8",marginBottom:16,lineHeight:1.6}}>
+                <strong style={{color:"#e2e8f0"}}>{iletisim.isim||"Dünya Bilişim"}</strong><br/>
+                {iletisim.tel&&<><span>📱 {iletisim.tel}</span><br/></>}
+                {iletisim.ig&&<><span>📸 {iletisim.ig}</span><br/></>}
+                {iletisim.adres&&<span>📍 {iletisim.adres}</span>}
+              </div>
+              <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+                <a href={qrVcard()} download="firma-qr.png" target="_blank"
+                  style={{...s.kaydetBtn,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6}}>
+                  💾 İndir
+                </a>
+                <button style={{...s.expBtn}} onClick={()=>{
+                  navigator.share?.({title:iletisim.isim,text:`${iletisim.tel||""}\n${iletisim.ig||""}`,url:window.location.href})
+                    .catch(()=>toast$("Paylaşım desteklenmiyor","warn"));
+                }}>📤 Paylaş</button>
+              </div>
+              <div style={{fontSize:11,color:"#4a6180",marginTop:12}}>
+                Müşteri QR'ı okutunca iletişim bilgilerini rehbere ekleyebilir
+              </div>
+            </div>
           </div>
         </div>
       )}
