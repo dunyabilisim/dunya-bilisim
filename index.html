@@ -56,7 +56,7 @@ const STORAGE_HDR = {"apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`};
 
 const sb = {
   async getAll(){const r=await fetch(`${SB_URL}/rest/v1/urunler?order=ekleme_tarihi.desc`,{headers:SBH});if(!r.ok)throw new Error(await r.text());return r.json();},
-  async upsert(u){const r=await fetch(`${SB_URL}/rest/v1/urunler`,{method:"POST",headers:{...SBH,"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id:u.id,ad:u.ad,kategori:u.kategori,marka:u.marka,model:u.model,spec:u.spec,satis_fiyati:parseFloat(u.satisFiyati)||0,alis_fiyati:parseFloat(u.alisFiyati)||null,alt_limit:parseFloat(u.altLimit)||null,durum:u.durum,notlar:u.notlar,ekleme_tarihi:u.eklemeTarihi||new Date().toISOString(),satildi_tarihi:u.satildiTarihi||null,foto_urls:u.fotoUrls||null})});if(!r.ok)throw new Error(await r.text());},
+  async upsert(u){const r=await fetch(`${SB_URL}/rest/v1/urunler`,{method:"POST",headers:{...SBH,"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id:u.id,ad:u.ad,kategori:u.kategori,marka:u.marka,model:u.model,spec:u.spec,satis_fiyati:parseFloat(u.satisFiyati)||0,alis_fiyati:parseFloat(u.alisFiyati)||null,alt_limit:parseFloat(u.altLimit)||null,durum:u.durum,notlar:u.notlar,ekleme_tarihi:u.eklemeTarihi||new Date().toISOString(),satildi_tarihi:u.satildiTarihi||null,foto_urls:u.fotoUrls||null,garanti_durum:u.garantiDurum||"yok",garanti_sure:u.garantiSure||"",stok_kodu:u.stokKodu||"",parametreler:u.parametreler||{}})});if(!r.ok)throw new Error(await r.text());},
   async delete(id){const r=await fetch(`${SB_URL}/rest/v1/urunler?id=eq.${id}`,{method:"DELETE",headers:SBH});if(!r.ok)throw new Error(await r.text());},
   async patch(id,fields){const r=await fetch(`${SB_URL}/rest/v1/urunler?id=eq.${id}`,{method:"PATCH",headers:SBH,body:JSON.stringify(fields)});if(!r.ok)throw new Error(await r.text());},
   async fotoYukle(urunId,base64,index){
@@ -82,6 +82,10 @@ function rowToUrun(row) {
     durum:row.durum||"mevcut", notlar:row.notlar||"",
     eklemeTarihi:row.ekleme_tarihi, satildiTarihi:row.satildi_tarihi,
     fotoUrls: row.foto_urls ? (Array.isArray(row.foto_urls)?row.foto_urls:JSON.parse(row.foto_urls)) : [],
+    garantiDurum: row.garanti_durum||"yok",
+    garantiSure: row.garanti_sure||"",
+    stokKodu: row.stok_kodu||"",
+    parametreler: row.parametreler ? (typeof row.parametreler==="object"?row.parametreler:JSON.parse(row.parametreler)) : {},
   };
 }
 
@@ -125,7 +129,68 @@ const DURUMLAR = {
 };
 const KAT_IKON = {"GPU":"🎮","CPU":"⚡","RAM":"💾","Anakart":"🔌","SSD/HDD":"💿","PSU":"🔋","Kasa":"📦","Laptop":"💻","Komple Sistem":"🖥️","Aksesuar":"🔧","Diğer":"📋"};
 
-const FORM_BOS = {id:null,ad:"",kategori:"GPU",marka:"",model:"",spec:"",satisFiyati:"",alisFiyati:"",altLimit:"",durum:"mevcut",notlar:""};
+// Kategori bazlı özel parametreler
+const KAT_PARAMS = {
+  "GPU": [
+    {key:"vram",      label:"VRAM (GB)",         tip:"text",  placeholder:"örn: 12"},
+    {key:"cuda",      label:"CUDA / Stream",      tip:"text",  placeholder:"örn: 8704"},
+    {key:"tdp",       label:"TDP (Watt)",         tip:"text",  placeholder:"örn: 350W"},
+    {key:"furmark",   label:"Furmark Maks °C",    tip:"text",  placeholder:"örn: 82°C"},
+    {key:"ekran_cik", label:"Ekran Çıkışları",    tip:"text",  placeholder:"örn: 3x DP, 1x HDMI"},
+    {key:"slot",      label:"Slot Genişliği",     tip:"text",  placeholder:"örn: 3 slot"},
+  ],
+  "CPU": [
+    {key:"nesil",     label:"Nesil / Seri",       tip:"text",  placeholder:"örn: 10. Nesil / Ryzen 5000"},
+    {key:"socket",    label:"Socket",             tip:"text",  placeholder:"örn: LGA1200 / AM4"},
+    {key:"cekirdek",  label:"Çekirdek/Thread",    tip:"text",  placeholder:"örn: 8C/16T"},
+    {key:"frekans",   label:"Frekans (GHz)",      tip:"text",  placeholder:"örn: 3.8 / 5.2 GHz"},
+    {key:"tdp",       label:"TDP (Watt)",         tip:"text",  placeholder:"örn: 125W"},
+    {key:"kutulu",    label:"Kutu / Fan",         tip:"select",options:["Kutusuz fansız","Kutulu orjinal fan","Kutusuz aftermarket fan"]},
+  ],
+  "RAM": [
+    {key:"kapasite",  label:"Kapasite (GB)",      tip:"text",  placeholder:"örn: 16"},
+    {key:"frekans",   label:"Frekans (MHz)",      tip:"text",  placeholder:"örn: 3200"},
+    {key:"tip",       label:"DDR Tipi",           tip:"select",options:["DDR4","DDR5","DDR3","DDR3L"]},
+    {key:"cl",        label:"CL Latency",         tip:"text",  placeholder:"örn: CL16"},
+    {key:"kit",       label:"Kit mi?",            tip:"select",options:["Tek modül","2x Kit","4x Kit"]},
+    {key:"marka_cip", label:"Chip Markası",       tip:"text",  placeholder:"örn: Samsung B-die"},
+  ],
+  "Anakart": [
+    {key:"soket",     label:"Socket",             tip:"text",  placeholder:"örn: AM5 / LGA1700"},
+    {key:"form",      label:"Form Faktör",        tip:"select",options:["ATX","mATX","ITX","E-ATX"]},
+    {key:"chipset",   label:"Chipset",            tip:"text",  placeholder:"örn: B650 / Z790"},
+    {key:"ram_slot",  label:"RAM Slot",           tip:"text",  placeholder:"örn: 4x DDR5"},
+    {key:"m2",        label:"M.2 Slot",           tip:"text",  placeholder:"örn: 2x M.2 NVMe"},
+  ],
+  "SSD/HDD": [
+    {key:"kapasite",  label:"Kapasite",           tip:"text",  placeholder:"örn: 1TB"},
+    {key:"arayuz",    label:"Arayüz",             tip:"select",options:["NVMe M.2","SATA M.2","SATA 2.5\"","SATA 3.5\"","PCIe"]},
+    {key:"hiz_okuma", label:"Okuma (MB/s)",       tip:"text",  placeholder:"örn: 7000"},
+    {key:"saglik",    label:"Sağlık %",           tip:"text",  placeholder:"örn: 98"},
+    {key:"kullanim",  label:"Kullanım (saat)",    tip:"text",  placeholder:"örn: 1240"},
+  ],
+  "PSU": [
+    {key:"watt",      label:"Watt",               tip:"text",  placeholder:"örn: 850W"},
+    {key:"sertifika", label:"80+ Sertifika",      tip:"select",options:["80+ Bronze","80+ Gold","80+ Platinum","80+ Titanium","80+ White","Yok"]},
+    {key:"moduler",   label:"Modüler",            tip:"select",options:["Tam modüler","Yarı modüler","Değil"]},
+    {key:"fan_mm",    label:"Fan Boyutu",         tip:"text",  placeholder:"örn: 120mm"},
+  ],
+  "Laptop": [
+    {key:"ekran",     label:"Ekran (inç)",        tip:"text",  placeholder:"örn: 15.6\""},
+    {key:"cozunurluk",label:"Çözünürlük",         tip:"text",  placeholder:"örn: 1920x1080"},
+    {key:"panel",     label:"Panel Tipi",         tip:"select",options:["IPS","TN","VA","OLED","Bilinmiyor"]},
+    {key:"pil",       label:"Pil Sağlığı %",      tip:"text",  placeholder:"örn: 87"},
+    {key:"klavye",    label:"Klavye Durumu",      tip:"select",options:["Mükemmel","İyi","Orta","Tuş sorunu var"]},
+    {key:"ekran_kart",label:"Ekran Kartı",        tip:"text",  placeholder:"örn: RTX 3060 / Iris Xe"},
+  ],
+  "Komple Sistem": [
+    {key:"form",      label:"Kasa Tipi",          tip:"select",options:["Tower","Mini Tower","SFF","All-in-One","Workstation"]},
+    {key:"isletim",   label:"İşletim Sistemi",    tip:"select",options:["Windows 11","Windows 10","Linux","Yok/Yüklü değil"]},
+    {key:"test",      label:"Cinebench / Skor",   tip:"text",  placeholder:"örn: R23: 24500p"},
+  ],
+};
+
+const FORM_BOS = {id:null,ad:"",kategori:"GPU",marka:"",model:"",spec:"",satisFiyati:"",alisFiyati:"",altLimit:"",durum:"mevcut",notlar:"",garantiDurum:"yok",garantiSure:"",stokKodu:"",parametreler:{}};
 
 function App() {
   const [urunler,setUrunler]         = useState([]);
@@ -158,7 +223,7 @@ function App() {
   const [girisModal,setGirisModal]   = useState(false);
   const [editForm,setEditForm]       = useState(null);
   const [toast,setToast]             = useState({msg:"",tip:""});
-  const [hg,setHg] = useState({adim:"secim",veri:{},alis:"",satisFiyati:"",durum:"mevcut",notlar:"",metin:"",foto:null,ekstraFotolar:[],yukleniyor:false});
+  const [hg,setHg] = useState({adim:"secim",veri:{},alis:"",satisFiyati:"",durum:"mevcut",notlar:"",garantiDurum:"yok",garantiSure:"",stokKodu:"",parametreler:{},metin:"",foto:null,ekstraFotolar:[],yukleniyor:false});
   const [kocAktifTab,setKocAktifTab] = useState("saglik");
   const [psw,setPsw] = useState({adim:"giris",sistemAdi:"",sistemSpec:"",alisFiyati:"",envanterSecim:"",parcalar:[],sonuc:null,yukleniyor:false,kayitYukleniyor:false});
   const pswSet = (patch) => setPsw(p=>({...p,...patch}));
@@ -186,7 +251,7 @@ function App() {
   useEffect(()=>{veriYukle();},[veriYukle]);
 
   const hgSet = (patch) => setHg(p=>({...p,...patch}));
-  const hgSifirla = () => { setHg({adim:"secim",veri:{},alis:"",satisFiyati:"",durum:"mevcut",notlar:"",metin:"",foto:null,ekstraFotolar:[],yukleniyor:false}); setGirisModal(false); };
+  const hgSifirla = () => { setHg({adim:"secim",veri:{},alis:"",satisFiyati:"",durum:"mevcut",notlar:"",garantiDurum:"yok",garantiSure:"",stokKodu:"",parametreler:{},metin:"",foto:null,ekstraFotolar:[],yukleniyor:false}); setGirisModal(false); };
 
   const aiTani = async(deger) => {
     hgSet({yukleniyor:true,adim:"tani"});
@@ -211,7 +276,7 @@ function App() {
         try { const url=await sb.fotoYukle(urunId,tumFotolar[i],i); fotoUrls.push(url); }
         catch(e){ console.warn("Foto yüklenemedi:",e.message); }
       }
-      const urun={id:urunId,ad:hg.veri.ad,kategori:hg.veri.kategori||"Diğer",marka:hg.veri.marka||"",model:hg.veri.model||"",spec:hg.veri.spec||"",satisFiyati:hg.satisFiyati,alisFiyati:hg.alis,altLimit:"",durum:hg.durum,notlar:hg.notlar,eklemeTarihi:new Date().toISOString(),fotoUrls};
+      const urun={id:urunId,ad:hg.veri.ad,kategori:hg.veri.kategori||"Diğer",marka:hg.veri.marka||"",model:hg.veri.model||"",spec:hg.veri.spec||"",satisFiyati:hg.satisFiyati,alisFiyati:hg.alis,altLimit:"",durum:hg.durum,notlar:hg.notlar,eklemeTarihi:new Date().toISOString(),fotoUrls,garantiDurum:hg.garantiDurum,garantiSure:hg.garantiSure,stokKodu:hg.stokKodu,parametreler:hg.parametreler};
       await sb.upsert(urun);
       setUrunler(p=>[urun,...p]);
       hgSifirla();
@@ -240,12 +305,72 @@ function App() {
     if(!apiKey){ toast$("⚠️ API key girilmedi","warn"); return; }
     setUretiliyor(true); setIlanMetni(null);
     try {
-      const prompt=`Sen "Dünya Bilişim" firmasının satış asistanısın. Şu ürün için 4 platform ilan metni yaz:\nÜrün: ${urun.ad} ${urun.marka} ${urun.model}\nSpec: ${urun.spec}\nFiyat: ${urun.satisFiyati} TL\n\n=== SAHİBİNDEN ===\n(150-200 kelime, resmi dil)\n\n=== LETGO ===\n(50-80 kelime, samimi)\n\n=== WOOCOMMERCE ===\n(SEO başlığı + 100-150 kelime)\n\n=== WHATSAPP ===\n(2-3 cümle, emoji)`;
+      // Kategori bazlı özel parametreler
+      const params = urun.parametreler||{};
+      const paramMetin = Object.entries(params).filter(([,v])=>v).map(([k,v])=>{
+        const katP = KAT_PARAMS[urun.kategori]||[];
+        const alan = katP.find(p=>p.key===k);
+        return alan?`${alan.label}: ${v}`:null;
+      }).filter(Boolean).join("\n");
+
+      const garantiMetin = urun.garantiDurum==="var"
+        ? `Garanti: VAR — ${urun.garantiSure||"belirtilmemiş"}`
+        : urun.garantiDurum==="servis" ? `Servis garantisi: ${urun.garantiSure||""}`
+        : "Garanti: YOK";
+
+      const stokMetin = urun.stokKodu ? `Stok No: #${urun.stokKodu}` : "";
+
+      // Kategori bazlı prompt ipuçları
+      const katIpucu = {
+        "GPU": "Furmark test sonucu varsa mutlaka belirt. Ekran çıkışları, slot genişliği, mining geçmişi yok/var gibi detayları ekle.",
+        "CPU": "Socket uyumluluğu, kutu/fan durumu, OC potansiyeli belirt.",
+        "RAM": "Kit bilgisi, frekans ve CL değeri öne çıkar. XMP/EXPO profili var mı belirt.",
+        "SSD/HDD": "Sağlık yüzdesi ve kullanım saati varsa mutlaka yaz. Arayüz tipi önemli.",
+        "Laptop": "Pil sağlığı, ekran durumu, klavye durumu, şarj aleti var mı belirt.",
+        "Anakart": "Socket ve form faktör öne çıkar, kutulu mu değil mi belirt.",
+      }[urun.kategori] || "Ürünün öne çıkan özelliklerini vurgula.";
+
+      const prompt = `Sen "Dünya Bilişim" firmasının uzman satış asistanısın.
+
+ÜRÜN BİLGİLERİ:
+Ürün: ${urun.ad} ${urun.marka} ${urun.model}
+Kategori: ${urun.kategori}
+Spec: ${urun.spec}
+${paramMetin?`\nÖzel Parametreler:\n${paramMetin}`:""}
+Fiyat: ${parseFloat(urun.satisFiyati||0).toLocaleString("tr-TR")} TL
+${garantiMetin}
+${stokMetin}
+${urun.notlar?`Not: ${urun.notlar}`:""}
+
+KATEGORİ İPUCU: ${katIpucu}
+
+KURALLAR:
+- Markdown kullanma (**, ##, --- gibi işaretler yasak)
+- Her platform için doğal, akıcı Türkçe yaz
+- Garanti durumunu mutlaka belirt
+- Stok kodu varsa ilanın sonuna ekle
+
+Şu 4 platform için ilan yaz:
+
+=== SAHİBİNDEN ===
+(150-200 kelime, güven veren resmi dil, teknik detaylar öne çıkar)
+
+=== LETGO ===
+(50-80 kelime, samimi ve enerjik, emoji kullan)
+
+=== WOOCOMMERCE ===
+(SEO odaklı başlık + 120-150 kelime ürün açıklaması)
+
+=== WHATSAPP ===
+(2-3 cümle max, fiyat + öne çıkan özellik + iletişim daveti, emoji)`;
+
       const yanit=await callClaude([{role:"user",content:prompt}],apiKey);
+      // Markdown kalıntılarını temizle
+      const temiz = yanit.replace(/\*\*/g,"").replace(/#{1,6}\s/g,"").replace(/---+/g,"").replace(/```[\s\S]*?```/g,"");
       const sections={};
       ["SAHİBİNDEN","LETGO","WOOCOMMERCE","WHATSAPP"].forEach((p,i,arr)=>{
-        const s=yanit.indexOf(`=== ${p} ===`); const e=i<arr.length-1?yanit.indexOf(`=== ${arr[i+1]} ===`):yanit.length;
-        if(s!==-1) sections[p]=yanit.slice(s+p.length+8,e).trim();
+        const s=temiz.indexOf(`=== ${p} ===`); const e=i<arr.length-1?temiz.indexOf(`=== ${arr[i+1]} ===`):temiz.length;
+        if(s!==-1) sections[p]=temiz.slice(s+p.length+8,e).trim();
       });
       setIlanMetni(sections);
     } catch(e) { toast$("❌ "+e.message,"err"); }
@@ -373,7 +498,90 @@ function App() {
     } catch(e){ toast$("❌ Kart hatası: "+e.message,"err"); setWaKarti(null); }
   };
 
-  const filtrelenmis=urunler.filter(u=>{
+  const [stokKarti,setStokKarti] = useState(null);
+
+  const stokKartiOlustur = async(urun) => {
+    setStokKarti({urun,yukleniyor:true});
+    await new Promise(r=>setTimeout(r,50));
+    try {
+      const W=420,H=520;
+      const c=document.createElement("canvas"); c.width=W; c.height=H;
+      const ctx=c.getContext("2d");
+      // Arka plan
+      const grad=ctx.createLinearGradient(0,0,0,H);
+      grad.addColorStop(0,"#0d1525"); grad.addColorStop(1,"#060b14");
+      ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+      // Üst renk şeridi
+      ctx.fillStyle="#4f46e5"; ctx.fillRect(0,0,W,6);
+      // Stok no + kategori badge
+      const d=DURUMLAR[urun.durum]||DURUMLAR.mevcut;
+      ctx.fillStyle=d.bg.replace(".15)",".5)"); ctx.beginPath(); ctx.roundRect(20,18,100,26,13); ctx.fill();
+      ctx.fillStyle=d.color; ctx.font="bold 12px monospace"; ctx.textAlign="left";
+      ctx.fillText(`● ${d.label}`,32,36);
+      if(urun.stokKodu){
+        ctx.fillStyle="rgba(99,102,241,.3)"; ctx.beginPath(); ctx.roundRect(W-80,18,60,26,13); ctx.fill();
+        ctx.fillStyle="#818cf8"; ctx.font="bold 12px monospace"; ctx.textAlign="right";
+        ctx.fillText(`#${urun.stokKodu}`,W-24,36);
+      }
+      // Ürün fotoğrafı
+      const fotoY=54,fotoH=180;
+      ctx.fillStyle="#1e2d4a"; ctx.beginPath(); ctx.roundRect(20,fotoY,W-40,fotoH,10); ctx.fill();
+      const urls=urun.fotoUrls||[];
+      if(urls[0]){
+        try{
+          const img=await new Promise((res,rej)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>res(i);i.onerror=rej;i.src=urls[0];});
+          ctx.save(); ctx.beginPath(); ctx.roundRect(20,fotoY,W-40,fotoH,10); ctx.clip();
+          const ar=img.width/img.height; const fAr=(W-40)/fotoH;
+          let sx=0,sy=0,sw=img.width,sh=img.height;
+          if(ar>fAr){sw=img.height*fAr;sx=(img.width-sw)/2;}else{sh=img.width/fAr;sy=(img.height-sh)/2;}
+          ctx.drawImage(img,sx,sy,sw,sh,20,fotoY,W-40,fotoH);
+          ctx.restore();
+        }catch(_){}
+      } else {
+        ctx.fillStyle="#4a6180"; ctx.font="52px serif"; ctx.textAlign="center";
+        ctx.fillText(KAT_IKON[urun.kategori]||"📋",W/2,fotoY+fotoH/2+18);
+      }
+      // Ürün adı
+      ctx.fillStyle="#f0f4f8"; ctx.font="bold 18px monospace"; ctx.textAlign="left";
+      const words=urun.ad.split(" "); let line=""; let ly=260;
+      for(const w of words){
+        if(ctx.measureText(line+w).width>W-40){ctx.fillText(line.trim(),20,ly);line="";ly+=24;}
+        line+=w+" ";
+      }
+      ctx.fillText(line.trim(),20,ly); ly+=24;
+      // Marka model
+      if(urun.marka||urun.model){ctx.fillStyle="#64748b";ctx.font="13px monospace";ctx.fillText(`${urun.marka} ${urun.model}`.trim(),20,ly);ly+=20;}
+      // Parametreler özeti
+      const katP=KAT_PARAMS[urun.kategori]||[];
+      const paramOzet=katP.slice(0,3).map(p=>{const v=(urun.parametreler||{})[p.key];return v?`${p.label}: ${v}`:null;}).filter(Boolean);
+      if(paramOzet.length){
+        ctx.fillStyle="#94a3b8"; ctx.font="11px monospace";
+        paramOzet.forEach((p,i)=>{ctx.fillText(p,20,ly+i*16);});
+        ly+=paramOzet.length*16+4;
+      }
+      // Separator
+      ctx.strokeStyle="#1e2d4a"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(20,ly+4); ctx.lineTo(W-20,ly+4); ctx.stroke();
+      ly+=16;
+      // Fiyat
+      ctx.fillStyle="#22c55e"; ctx.font="bold 28px monospace";
+      ctx.fillText(`${parseFloat(urun.satisFiyati||0).toLocaleString("tr-TR")} ₺`,20,ly+28);
+      // Garanti
+      const gRenk=urun.garantiDurum==="var"?"#22c55e":urun.garantiDurum==="servis"?"#f59e0b":"#94a3b8";
+      const gMetin=urun.garantiDurum==="var"?`🛡️ Garantili${urun.garantiSure?" — "+urun.garantiSure:""}`:urun.garantiDurum==="servis"?`🛡️ Servis${urun.garantiSure?" — "+urun.garantiSure:""}` :"🛡️ Garanti Yok";
+      ctx.fillStyle=gRenk; ctx.font="12px monospace";
+      ctx.fillText(gMetin,20,ly+50);
+      // Alt firma bilgisi
+      ctx.fillStyle="rgba(99,102,241,.1)"; ctx.fillRect(0,H-44,W,44);
+      ctx.strokeStyle="#4f46e5"; ctx.lineWidth=0.5;
+      ctx.beginPath(); ctx.moveTo(0,H-44); ctx.lineTo(W,H-44); ctx.stroke();
+      ctx.fillStyle="#818cf8"; ctx.font="bold 13px monospace"; ctx.textAlign="left";
+      ctx.fillText(`⚡ ${iletisim.isim||"Dünya Bilişim"}`,20,H-26);
+      if(iletisim.tel){ctx.fillStyle="#4a6180";ctx.font="11px monospace";ctx.fillText(iletisim.tel,20,H-10);}
+      if(iletisim.ig){ctx.fillStyle="#4a6180";ctx.font="11px monospace";ctx.textAlign="right";ctx.fillText(iletisim.ig,W-20,H-10);}
+      setStokKarti({urun,yukleniyor:false,dataUrl:c.toDataURL("image/png")});
+    } catch(e){ toast$("❌ Stok kartı hatası: "+e.message,"err"); setStokKarti(null); }
+  };
     if(filtre.durum!=="hepsi"&&u.durum!==filtre.durum) return false;
     if(filtre.kategori!=="hepsi"&&u.kategori!==filtre.kategori) return false;
     if(filtre.arama&&!`${u.ad} ${u.marka} ${u.model}`.toLowerCase().includes(filtre.arama.toLowerCase())) return false;
@@ -874,12 +1082,40 @@ PSİKOLOJİ: [1 cümle analiz]`;
                         <div style={s.detayBolum}>
                           <div style={s.detayBaslik}>Paylaş & İlan</div>
                           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                            <button style={{...s.ilanBtn,background:"#16a34a"}} onClick={()=>waKartOlustur(u)}>📲 WhatsApp Kartı</button>
+                            <button style={{...s.ilanBtn,background:"#16a34a"}} onClick={()=>waKartOlustur(u)}>📲 WA Kartı</button>
+                            <button style={{...s.ilanBtn,background:"#0e7490"}} onClick={()=>stokKartiOlustur(u)}>🏷️ Stok Kartı</button>
                             <button style={s.ilanBtn} onClick={()=>ilanUret(u)} disabled={uretiliyor}>{uretiliyor?"⏳ Üretiliyor...":"📝 İlan Metni"}</button>
                           </div>
                           {ilanMetni&&<div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>{Object.entries(ilanMetni).map(([p,m])=><IlanBlok key={p} platform={p} metin={m}/>)}</div>}
                         </div>
                         {u.notlar&&<div style={s.detayBolum}><div style={s.detayBaslik}>Notlar</div><div style={{fontSize:12,color:"#94a3b8"}}>{u.notlar}</div></div>}
+
+                        {/* Garanti + Stok Kodu */}
+                        <div style={s.detayBolum}>
+                          <div style={s.detayBaslik}>Garanti & Stok</div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                            <span style={{fontSize:12,padding:"4px 10px",borderRadius:20,fontWeight:600,
+                              background:u.garantiDurum==="var"?"rgba(34,197,94,.15)":u.garantiDurum==="servis"?"rgba(245,158,11,.15)":"rgba(148,163,184,.12)",
+                              color:u.garantiDurum==="var"?"#22c55e":u.garantiDurum==="servis"?"#f59e0b":"#94a3b8"}}>
+                              🛡️ {u.garantiDurum==="var"?`Garantili${u.garantiSure?" — "+u.garantiSure:""}`:u.garantiDurum==="servis"?`Servis Garantisi${u.garantiSure?" — "+u.garantiSure:""}` :"Garanti Yok"}
+                            </span>
+                            {u.stokKodu&&<span style={{fontSize:12,padding:"4px 10px",borderRadius:20,background:"rgba(99,102,241,.15)",color:"#818cf8",fontWeight:600}}>#{u.stokKodu}</span>}
+                          </div>
+                        </div>
+
+                        {/* Kategori Parametreleri */}
+                        {KAT_PARAMS[u.kategori]?.length>0&&Object.keys(u.parametreler||{}).filter(k=>(u.parametreler||{})[k]).length>0&&(
+                          <div style={s.detayBolum}>
+                            <div style={s.detayBaslik}>{KAT_IKON[u.kategori]} {u.kategori} Parametreleri</div>
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                              {KAT_PARAMS[u.kategori].map(p=>{
+                                const v=(u.parametreler||{})[p.key];
+                                if(!v) return null;
+                                return <span key={p.key} style={{fontSize:11,padding:"3px 8px",borderRadius:6,background:"#1e2d4a",color:"#94a3b8"}}><span style={{color:"#4a6180"}}>{p.label}:</span> <strong style={{color:"#cbd5e1"}}>{v}</strong></span>;
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1385,6 +1621,51 @@ PSİKOLOJİ: [1 cümle analiz]`;
 
                   <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Notlar</label><input style={s.fInput} placeholder="Kutusuz, çizik, garantili..." value={hg.notlar||""} onChange={e=>hgSet({notlar:e.target.value})}/></div>
 
+                  {/* Garanti */}
+                  <div style={s.fGrup}>
+                    <label style={s.fLbl}>🛡️ Garanti Durumu</label>
+                    <select style={s.fInput} value={hg.garantiDurum} onChange={e=>hgSet({garantiDurum:e.target.value})}>
+                      <option value="yok">Garanti Yok</option>
+                      <option value="var">Garantili</option>
+                      <option value="servis">Servis Garantisi</option>
+                    </select>
+                  </div>
+                  {(hg.garantiDurum==="var"||hg.garantiDurum==="servis")&&(
+                    <div style={s.fGrup}>
+                      <label style={s.fLbl}>Garanti Süresi</label>
+                      <input style={s.fInput} placeholder="örn: 6 ay / 2026 Mart" value={hg.garantiSure||""} onChange={e=>hgSet({garantiSure:e.target.value})}/>
+                    </div>
+                  )}
+                  <div style={s.fGrup}>
+                    <label style={s.fLbl}>📦 Stok Kodu</label>
+                    <input style={s.fInput} placeholder="örn: 682" value={hg.stokKodu||""} onChange={e=>hgSet({stokKodu:e.target.value})}/>
+                  </div>
+
+                  {/* Kategori bazlı parametreler */}
+                  {KAT_PARAMS[hg.veri.kategori||""]?.length>0&&(
+                    <div style={{gridColumn:"1/-1"}}>
+                      <div style={{fontSize:11,color:"#818cf8",letterSpacing:.5,textTransform:"uppercase",marginBottom:8,marginTop:4,display:"flex",alignItems:"center",gap:6}}>
+                        <span>{KAT_IKON[hg.veri.kategori]}</span>
+                        <span>{hg.veri.kategori} Parametreleri</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        {KAT_PARAMS[hg.veri.kategori].map(p=>(
+                          <div key={p.key} style={s.fGrup}>
+                            <label style={s.fLbl}>{p.label}</label>
+                            {p.tip==="select"?(
+                              <select style={s.fInput} value={(hg.parametreler||{})[p.key]||""} onChange={e=>hgSet({parametreler:{...(hg.parametreler||{}),[p.key]:e.target.value}})}>
+                                <option value="">— Seçin —</option>
+                                {p.options.map(o=><option key={o}>{o}</option>)}
+                              </select>
+                            ):(
+                              <input style={s.fInput} placeholder={p.placeholder} value={(hg.parametreler||{})[p.key]||""} onChange={e=>hgSet({parametreler:{...(hg.parametreler||{}),[p.key]:e.target.value}})}/>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Ekstra fotoğraf ekleme */}
                   <div style={{gridColumn:"1/-1",...s.fGrup}}>
                     <label style={s.fLbl}>📸 {hg.foto?"Ana foto + ekstra ekle":"Fotoğraf ekle"}</label>
@@ -1479,6 +1760,35 @@ PSİKOLOJİ: [1 cümle analiz]`;
         </div>
       )}
 
+      {/* ── STOK KARTI MODAL ── */}
+      {stokKarti&&(
+        <div style={{...s.overlay,zIndex:300}} onClick={e=>e.target===e.currentTarget&&setStokKarti(null)}>
+          <div style={{...s.modal,maxWidth:480}}>
+            <div style={s.modalHdr}>
+              <span style={s.modalT}>🏷️ Stok Kartı</span>
+              <button style={s.xBtn} onClick={()=>setStokKarti(null)}>✕</button>
+            </div>
+            <div style={{padding:20}}>
+              {stokKarti.yukleniyor&&<div style={{textAlign:"center",padding:"40px 0",color:"#0e7490"}}>⏳ Kart oluşturuluyor...</div>}
+              {stokKarti.dataUrl&&(<>
+                <img src={stokKarti.dataUrl} alt="Stok Kartı" style={{width:"100%",borderRadius:10,border:"1px solid #1e2d4a",marginBottom:16}}/>
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  <a href={stokKarti.dataUrl} download={`stok-${stokKarti.urun.stokKodu||stokKarti.urun.ad.slice(0,10)}.png`}
+                    style={{...s.kaydetBtn,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6,background:"#0e7490"}}>
+                    💾 İndir
+                  </a>
+                  <a href={`https://wa.me/?text=${encodeURIComponent(`${stokKarti.urun.ad}\n${stokKarti.urun.spec||""}\n${parseFloat(stokKarti.urun.satisFiyati||0).toLocaleString("tr-TR")} ₺${stokKarti.urun.stokKodu?" #"+stokKarti.urun.stokKodu:""}`)}`}
+                    target="_blank" rel="noreferrer"
+                    style={{...s.devamBtn,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6,background:"#16a34a"}}>
+                    💬 WA'ya Gönder
+                  </a>
+                </div>
+              </>)}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── QR KOD MODAL ── */}
       {qrModal&&(
         <div style={{...s.overlay,zIndex:300}} onClick={e=>e.target===e.currentTarget&&setQrModal(false)}>
@@ -1546,6 +1856,48 @@ PSİKOLOJİ: [1 cümle analiz]`;
                 <div style={s.fGrup}><label style={s.fLbl}>Satış Fiyatı (₺) *</label><input style={s.fInput} type="number" value={editForm.satisFiyati||""} onChange={e=>setEditForm(p=>({...p,satisFiyati:e.target.value}))}/></div>
                 <div style={s.fGrup}><label style={{...s.fLbl,color:"#f59e0b"}}>Alış Fiyatı — Gizli</label><input style={s.fInput} type="number" value={editForm.alisFiyati||""} onChange={e=>setEditForm(p=>({...p,alisFiyati:e.target.value}))}/></div>
                 <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Alt Limit — Pazarlık sınırı</label><input style={s.fInput} type="number" value={editForm.altLimit||""} onChange={e=>setEditForm(p=>({...p,altLimit:e.target.value}))}/></div>
+
+                {/* Garanti + Stok */}
+                <div style={s.fGrup}>
+                  <label style={s.fLbl}>🛡️ Garanti</label>
+                  <select style={s.fInput} value={editForm.garantiDurum||"yok"} onChange={e=>setEditForm(p=>({...p,garantiDurum:e.target.value}))}>
+                    <option value="yok">Garanti Yok</option>
+                    <option value="var">Garantili</option>
+                    <option value="servis">Servis Garantisi</option>
+                  </select>
+                </div>
+                <div style={s.fGrup}>
+                  <label style={s.fLbl}>{editForm.garantiDurum!=="yok"?"Garanti Süresi":"Stok Kodu"}</label>
+                  {editForm.garantiDurum!=="yok"
+                    ?<input style={s.fInput} placeholder="örn: 6 ay" value={editForm.garantiSure||""} onChange={e=>setEditForm(p=>({...p,garantiSure:e.target.value}))}/>
+                    :<input style={s.fInput} placeholder="örn: 682" value={editForm.stokKodu||""} onChange={e=>setEditForm(p=>({...p,stokKodu:e.target.value}))}/> }
+                </div>
+                {editForm.garantiDurum!=="yok"&&(
+                  <div style={s.fGrup}><label style={s.fLbl}>Stok Kodu</label><input style={s.fInput} placeholder="örn: 682" value={editForm.stokKodu||""} onChange={e=>setEditForm(p=>({...p,stokKodu:e.target.value}))}/></div>
+                )}
+
+                {/* Kategori parametreleri */}
+                {KAT_PARAMS[editForm.kategori]?.length>0&&(
+                  <div style={{gridColumn:"1/-1"}}>
+                    <div style={{fontSize:11,color:"#818cf8",letterSpacing:.5,textTransform:"uppercase",marginBottom:8,marginTop:4}}>{KAT_IKON[editForm.kategori]} {editForm.kategori} Parametreleri</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      {KAT_PARAMS[editForm.kategori].map(p=>(
+                        <div key={p.key} style={s.fGrup}>
+                          <label style={s.fLbl}>{p.label}</label>
+                          {p.tip==="select"?(
+                            <select style={s.fInput} value={(editForm.parametreler||{})[p.key]||""} onChange={e=>setEditForm(f=>({...f,parametreler:{...(f.parametreler||{}),[p.key]:e.target.value}}))}>
+                              <option value="">— Seçin —</option>
+                              {p.options.map(o=><option key={o}>{o}</option>)}
+                            </select>
+                          ):(
+                            <input style={s.fInput} placeholder={p.placeholder} value={(editForm.parametreler||{})[p.key]||""} onChange={e=>setEditForm(f=>({...f,parametreler:{...(f.parametreler||{}),[p.key]:e.target.value}}))}/>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div style={{gridColumn:"1/-1",...s.fGrup}}><label style={s.fLbl}>Notlar</label><textarea style={{...s.fInput,height:52,resize:"vertical"}} value={editForm.notlar||""} onChange={e=>setEditForm(p=>({...p,notlar:e.target.value}))}/></div>
               </div>
               <div style={s.mBtnlar}>
